@@ -11,35 +11,36 @@
 
 module Main where
 
-    import Lib (runEcuAt , defaultUSBPath, testModeFile )
-    import System.Environment (getArgs)
-    import System.IO -- for stdin, Buffering Mode
-    import qualified Data.ByteString as BS
+import Lib (runEcuAt , defaultUSBPath, testModeFile )
+import System.Environment (getArgs)
+import System.IO -- for stdin, Buffering Mode
+import qualified Data.ByteString as BS
     
     
-    import Data.List -- for test
-    import Data.Word
-    import Data.List.Split
-    import System.Directory
-    import Numeric
+import Data.List -- for test
+import Data.Word
+import Data.List.Split
+import System.Directory
+import Numeric
      
-    main :: IO ()
-    main = do
-      args <- System.Environment.getArgs
-      case args of
-          []           -> do
+main :: IO ()
+main = do
+    args <- System.Environment.getArgs
+    case args of
+        []           -> do
             hSetBuffering stdin NoBuffering -- set non buffering mode 
             hSetEcho      stdin True
-            Prelude.putStr "Test with testModeFile.csv ? (y/n)"
+            Prelude.putStr "Test with testModeFile.csv ? (y/N)"
             hFlush stdout
             c <- getChar
-            if c `elem` "nN\n" then
-              runEcuAt defaultUSBPath
+            Prelude.putStrLn ""
+            if c `elem` "yYfF" then
+                runEcuAt testModeFile
             else 
-              runEcuAt testModeFile
-          [theEcuPort] -> runEcuAt theEcuPort
-          _            -> Prelude.putStrLn "error: exactly one arguments needed." 
-      hSetBuffering stdin LineBuffering -- set buffering mode
-      hSetEcho      stdin True
-      Prelude.putStrLn "\nbye!"
-      return ()
+                runEcuAt defaultUSBPath
+        [theEcuPort] -> runEcuAt theEcuPort
+        _            -> Prelude.putStrLn "error: exactly one arguments needed." 
+    hSetBuffering stdin LineBuffering -- set buffering mode
+    hSetEcho      stdin True
+    Prelude.putStrLn "Thank you. See you again! " 
+    return ()

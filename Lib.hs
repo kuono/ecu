@@ -155,25 +155,31 @@ data ModelData = ModelData { name :: String, mdb :: BS.ByteString , d8size ::Int
 instance Show ModelData where 
       show model = show $ name model
 mne00000  = ModelData { name = "N/A", mdb = BS.empty , d8size = 0, d7size = 0 }
-mne101070 = ModelData { name = "MNE101070", mdb = BS.pack [0x99, 0x00, 0x02, 0x03] , d8size = 28 , d7size = 32 } -- 153, 0, 2, 3 Manual SPI -        Cooper	 69493	103112
-mne101170 = ModelData { name = "MNE101170", mdb = BS.pack [0x99, 0x00, 0x03, 0x03] , d8size = 28 , d7size = 32 } -- 153, 0, 3, 3 Manual SPI - Except Cooper	103113	134454
-mne10078  = ModelData { name = "MNE10078 the Great Japanese Model!!" , mdb = BS.pack [0x39, 0x00, 0x00, 0x5c] , d8size = 28 , d7size = 14 {- =0x0E -} } 
+mne10078  = ModelData { 
+  name = "MNE10078  Manual SPI Japan Cooper        - 60487", 
+  mdb = BS.pack [0x39, 0x00, 0x00, 0x5c] {-  57, 0, 0, 92 -}, 
+  d8size = 28 , d7size = 14 {- =0x0E -} } 
+mne101070 = ModelData { 
+  name = "MNE101070 Manual SPI Cooper         69493-103112", 
+  mdb = BS.pack [0x99, 0x00, 0x02, 0x03] {- 153, 0, 2,  3 -}, 
+  d8size = 28 , d7size = 32 } 
+mne101170 = ModelData { 
+  name = "MNE101170 Manual SPI Except Cooper 103113-134454", 
+  mdb = BS.pack [0x99, 0x00, 0x03, 0x03] {- 153, 0, 3,  3 -}, 
+  d8size = 28 , d7size = 32 }
     -- https://blogs.yahoo.co.jp/dmxbd452/5751726.html
     -- http://www.minispares.com/product/Classic/MNE101070.aspx
     -- Part number	Manual / Automatic	Attributes	              VIN No. From - VIN No. To 
     -- MNE10026	 Automatic	SPI -         Except Cooper	 	          - 59844
     -- MNE10027	 Manual    	SPI - Japan - Except Cooper	          	- 60487
     -- MNE10097	 Manual	    SPI -         Except Cooper - 1992-93	 	- 59586
-    -- MNE10078	 Manual	    SPI - Japan - Cooper	 	                - 60487  #### これかな？ ####
     -- MNE10090	 Automatic	SPI -         Except Cooper	            59845	68084
     -- MNE101060 Automatic	SPI -         Except Cooper	            68085	103112
     -- MNE10092	 Manual	    SPI -         Cooper	                  60488	69492
-    -- MNE101070 Manual	    SPI -         Cooper	                  69493	103112
     -- MNE10089	 Manual	    SPI - Except Cooper	                    59587	67377
     -- MNE101040 Manual	    SPI - Except Cooper	67378	103112
     -- MNE101150 Manual	    SPI - Except Cooper	103113	134454
     -- MNE101160 Automatic	SPI - Except Cooper	103113	134454
-    -- MNE101170 Manual   	SPI - Except Cooper	103113	134454
     -- MNE101350 Manual	    SPI - Except UK - 1996 on	134455 - 	 
     -- MNE101351 Manual	    SPI - Except UK - 1996 on	134455 - 
     -- MNE101360 Automatic	SPI - Except UK - 1996 on	134455 - 	 
@@ -181,8 +187,14 @@ mne10078  = ModelData { name = "MNE10078 the Great Japanese Model!!" , mdb = BS.
     
     -- ^ original number for size of Frame 7d = 32
     
-data ECUData     = ECUData { status :: ECUStatus, at :: LocalTime , res :: Maybe ECUData807d }  
-data ECUStatus   = Connected ModelData | NotConnected String 
+-- data ECUData     = ECUData { status :: ECUStatus, at :: LocalTime , res :: Maybe ECUData807d } 
+data ECUData     = ECUData { status :: ECUStatus, at :: LocalTime } 
+instance Show ECUData where
+  show d = case status d of 
+    Connected    model   -> show model 
+    GotData      dt      -> show dt
+    NotConnected message -> show message
+data ECUStatus   = Connected ModelData | GotData ECUData807d | NotConnected String 
 instance Show ECUStatus where
   show d = case d of 
     Connected    mdl -> show mdl
@@ -321,12 +333,12 @@ runEcuAt path = do
         loopECUwith dch (lid, did, cid) = do
           ch <- getChar
           case ch of
-            '\ESC'    -> do {Ex.throwTo lid (Quit) ; Ex.throwTo did Quit ; Ex.throwTo cid Quit ; Ex.throw Quit } -- ; return ()}
-            'q'       -> do {Ex.throwTo lid (Quit) ; Ex.throwTo did Quit ; Ex.throwTo cid Quit ; Ex.throw Quit } -- ; return ()}
-            '\''      -> do {Ex.throwTo lid (Quit) ; Ex.throwTo did Quit ; Ex.throwTo cid Quit ; Ex.throw Quit } -- ; return ()}
+            '\ESC'    -> do { Ex.throwTo cid Quit ; Ex.throwTo lid (Quit) ; Ex.throwTo did Quit ; return ()}
+            'q'       -> do { Ex.throwTo cid Quit ; Ex.throwTo lid (Quit) ; Ex.throwTo did Quit ; return ()}
+            '\''      -> do { Ex.throwTo cid Quit ; Ex.throwTo lid (Quit) ; Ex.throwTo did Quit ; return ()}
             -- ^ quit command issued. single quote key on dvorak layout is located at 'q' location of qwerty keyboard. 
             otherwise -> do -- {killThread cid ; cid' <- forkIO $ communicateWith path dch; loopECUwith dch (lid,did,cid') } 
-                            {Ex.throwTo cid Reconnect ; loopECUwith dch (lid, did, cid) }
+                            { Ex.throwTo cid Reconnect ; loopECUwith dch (lid, did, cid) }
                     -- ^ kill communication thread 
                     --   いきなりkillするのは危険すぎないか，要検討。--> withSerial使っているから大丈夫？
                     --   ところがどっこい，キーを押すとその瞬間エンジンが瞬停する場合がある。
@@ -334,89 +346,83 @@ runEcuAt path = do
                     --   いきなりケーブルを引っこ抜く，その後にケーブルを接続しても再接続できない
                     --   (ポートビジー）状態でいるなどの時，アイドリング回転数が落ちた。再現性はあるか，不明。
 
--- withSerial' :: String -> SerialPortSettings -> ( SerialPort -> IO () ) -> IO ()
--- withSerial' dev settings = Ex.bracket 
---   {- open  -} (openSerial dev settings)
---   {- close -} (\port -> do
---                 closeSerial port
---                 withSerial' dev settings
---                 )
--- -- bracket:: IO a -> (a -> IO b) -> (a -> IO c) -> IO c
-
 -- | ECUとのコミュニケーションをする関数（というのかね，アクションばかりの場合も...)。
 communicateWith :: FilePath -> ECUDataCh -> IO ()
-communicateWith f dc = do
-  if f == testModeFile then do
-    composeAndWriteDataWithTestDataFile f dc
-  else
-    forever $ do
-      -- Prelude.putStrLn $ "File path = " ++ (show f)
+communicateWith dev dchan = do
+  if dev == testModeFile then do
+    composeAndWriteDataWithTestDataFile dev dchan
+  else do
+    -- Prelude.putStrLn $ "File Path : " ++ f
+    -- forever $ do
+    --   -- Prelude.putStrLn $ "File path = " ++ (show f)
       -- forever $ do -- ^ ECUとのコミュニケーションが取れなくなっても再接続を永遠に試みる。
       -- withECU :: String -> SerialPortSettings -> ( SerialPort -> IO a ) -> IO a
-      withECU f defaultSerialSettings {timeout= 5, flowControl = Software }  -- time out = 0.5sec
+      withECU dev  -- time out = 0.5sec
         -- ^ withSerialはbracketを使っているので例外発生時もポートを閉じてくれる。
         -- ^ ただし、例外処理を受け取ったら、そのまま動作を継続してくれるのか？おそらく違う。そうだとするとcatchは
         -- ^ どこに入れるべきか？ withSerialにかかるように入れてみた。
         -- ^ ポート開閉時以外は非同期例外を受け付けてしまうので、新たなラッピング関数 wethECU を導入。2019.03.15 
         -- ^ withECU も実態は bracket なので、非同期例外発生時もポートを閉じる。
-        -- ^ また、
+        -- ^ また、bracketは例外を呼び出し側に投げ返す。→ catchは外側に
           $ \(ecu, model) -> Ex.mask $ \unmask -> do 
-              -- Prelude.putStrLn $ "I will initialize ECU in withSerial" -- ++ (show ecu)
-              -- m <- initialize ecu :: IO (ECUStatus)
-                    forever $ {- Ex.mask $ \unmask -> -} do
-                        jikoku <- currentTime :: IO LocalTime
-                        r8 <- sndCmd80to' ecu 
-                        case r8 of 
-                          Left e  -> do 
-                            writeChan dc $ ECUData { status = NotConnected ("E8: " ++ e) , at = jikoku , res = Nothing }
-                            -- Ex.throwIO Reconnect
-                          Right data80 -> do
-                            if (BS.length data80) /= (fromIntegral $ BS.index data80 0) then do
-                              writeChan dc $ ECUData { status = NotConnected $ "8S: D80 size was reported as " ++ show (BS.index data80 0 ) ++ " but actual size was " ++ show (BS.length data80)  , 
-                                                      at = jikoku , res = Nothing }
-                              -- Ex.throwIO Reconnect
-                            else do
-                              r7 <- sndCmd7Dto' ecu
-                              case r7 of
-                                Left e -> do
-                                  writeChan dc $ ECUData { status = NotConnected ("E7: " ++ e) , at = jikoku , res = Just ECUData807d { d80 = data80, d7d = BS.empty } }
-                                  -- communicateWith f dc
-                                  -- Ex.throwIO Reconnect
-                                Right data7d -> do
-                                  if fromIntegral (BS.index data7d 0) == (BS.length data7d) then do 
-                                    writeChan dc $ ECUData { status = Connected model , at = jikoku , res = Just ECUData807d { d80 = data80, d7d = data7d} }
-                                  else do 
-                                    writeChan dc $ ECUData { status = NotConnected $ "7S: D7D size was " ++ show (BS.length data7d) ++ " but reported as " ++ show (BS.index data7d 0 ) , 
-                                                          at = jikoku , res = Nothing }
-                                    -- Ex.throwIO Reconnect
-  `Ex.catch`
+              -- | 内外からの例外はこのループ内で発生または受信し， withECU (実態はbracket) で処理（ポート閉鎖）の上，catch部で再接続のため再起される
+              forever $ do  
+                -- | このループでも割り込みを受け付けるために無理やり入れてみた。もっとよいアイディアがないか。また、最適化で削除されないか？
+                unmask ( do { return () }) 
+                jikoku <- currentTime :: IO LocalTime
+                -- | Monad? 化のアイディア
+                -- |   type ECU         = ECUCmdByte -> [ECUDataByte] -> Either String IO (ECUResult)
+                -- |   type ECUCmdByte  = BS.ByteString
+                -- |   type ECUDataByte = BS.ByteString
+                -- |   type ECUResult   = BS.ByteString 
+                r8 <- sndCmd80to' ecu 
+                case r8 of 
+                  Left e  -> do 
+                    writeChan dchan $ ECUData { status = NotConnected ("E8: " ++ e) , at = jikoku }
+                    flush ecu
+                    Ex.throwIO Reconnect
+                  Right data80 -> do
+                    if (BS.length data80) /= (fromIntegral $ BS.index data80 0) then do
+                      writeChan dchan $ ECUData { status = NotConnected $ "8S: D80 size was reported as " ++ show (BS.index data80 0 ) ++ " but actual size was " ++ show (BS.length data80)  , 
+                                              at = jikoku }
+                      flush ecu
+                      Ex.throwIO Reconnect
+                    else do
+                      r7 <- sndCmd7Dto' ecu
+                      case r7 of
+                        Left e -> do
+                          writeChan dchan $ ECUData { status = NotConnected ("E7: " ++ e ++ "d80= " ++ show data80 ) , at = jikoku }
+                          -- communicateWith f dc
+                          flush ecu
+                          Ex.throwIO Reconnect
+                        Right data7d -> do
+                          if fromIntegral (BS.index data7d 0) == (BS.length data7d) then do 
+                            -- | ここがすべてのデータを正常受信したときの処理
+                            writeChan dchan $ ECUData { status = GotData ECUData807d { d80 = data80, d7d = data7d} , at = jikoku }
+                          else do 
+                            writeChan dchan $ ECUData { status = NotConnected $ "7S: D7D size was " ++ show (BS.length data7d) ++ " but reported as " ++ show (BS.index data7d 0 ) , 
+                                                  at = jikoku }
+                            flush ecu
+                            Ex.throwIO Reconnect
+  `Ex.catch`  -- testモードでも有効
             \e -> case (e::UserCMD) of 
-                  Reconnect  -> do  --ima <- currentTime
-                                  -- Prelude.putStrLn $ (vt100mv 0 0) ++ "restarting communication module because of reconnect command at " ++ show ima
-                                  Prelude.putStr $ bred ++ white ++ "Try recconnect" ++ reset
-                                  communicateWith f dc
-                  -- Quit      -> do -- ima <- currentTime
-  --                                 -- Prelude.putStrLn $ (vt100mv 0 0) ++ "quitting communication module because of quit command at " ++ show ima
-  --                                 Ex.throwIO Quit
-  --                                 return ()
-  --                 otherwise -> do ima <- currentTime
-  --                                 Prelude.putStrLn $ (vt100mv 0 0) ++ "quitting communication module because of something wrong at " ++ show ima
-  --                                 return ()
+                  Reconnect  -> do { communicateWith dev dchan }
+                  Quit       -> do { return () }
   where
-    withECU :: String -> SerialPortSettings -> ( (SerialPort,ModelData) -> IO a ) -> IO a
-    withECU dev settings = Ex.bracket
+    withECU :: FilePath -> ( (SerialPort,ModelData) -> IO a ) -> IO a
+    withECU dev = Ex.bracket
       ( do 
-          ecu <- openSerial dev settings
-          stat <- initialize ecu :: IO (ECUStatus)
-          case stat of
-            Connected model -> return (ecu , model)
-            NotConnected  _ -> Ex.throwIO Reconnect
-      )
+          result@(_,model) <- initialize dev :: IO (SerialPort, ModelData) 
+          jikoku <- currentTime
+          writeChan dchan $ ECUData { status = Connected model, at = jikoku } 
+          return result )
       ( \(ecu,_) -> closeSerial ecu )
 
 
 composeAndWriteDataWithTestDataFile::FilePath -> ECUDataCh -> IO()
 composeAndWriteDataWithTestDataFile p dc = do
+  kaishijikoku <- currentTime
+  writeChan dc ECUData { status = Connected mne00000 , at = kaishijikoku }
   withFile p ReadMode loop
   where
       loop ::Handle -> IO ()
@@ -430,12 +436,12 @@ composeAndWriteDataWithTestDataFile p dc = do
             let d807d = compose raw
             case d807d of
               Right d  -> do
-                writeChan dc $ ECUData (Connected mne00000) ima $ Just d 
+                writeChan dc $ ECUData { status = GotData d , at = ima }  
                 threadDelay 400000 -- 0.4 sec
                 loop h
               Left m   -> do
                 -- print m
-                writeChan dc $ ECUData (NotConnected m ) ima $ Nothing
+                writeChan dc $ ECUData (NotConnected m ) ima 
                 threadDelay 400000 -- 0.4 sec
                 loop h            
 
@@ -537,22 +543,21 @@ logger dch = do
   logfn <- logFileName :: IO (FilePath)
   withFile logfn WriteMode
     $ \logfh -> do
-        -- hPutStrLn logfh  $ "Date,Time," ++ frame80Title ++ "," ++ frame7DTitle
+        hPutStrLn logfh  $ "Date,Time," ++ frame80Title ++ "," ++ frame7DTitle
         -- hPutStrLn logfh  $ ",," ++ frame80Title1
         -- hPutStrLn logfh  $ ",," ++ frame80Title2
         -- hFlush logfh
         forever $ do
           d <- readChan dch
+          jikoku <- currentTime
           case status d of 
             Connected model -> {- Ex.mask $ \unmask -> -} do
-              case res d of
-                Just d807d -> do
-                  let j  = localTimetoString $ at d
-                      d8 = frame80toTable.parse80 $ d80 d807d
-                      d7 = frame7DtoTable.parse7d $ d7d d807d
-                  hPutStrLn logfh  $ j ++ "," ++ d8 ++ "," ++ d7
-                otherwise  -> do
-                  hPutStrLn logfh $ "At " ++ show ( at d ) ++ ", While in a loop, Illegan Nothing data."
+              hPutStrLn logfh $ "Connected : " ++ show model ++ " at " ++ show jikoku
+            GotData d807d -> do
+              let j  = localTimetoString $ at d
+                  d8 = frame80toTable.parse80 $ d80 d807d
+                  d7 = frame7DtoTable.parse7d $ d7d d807d
+              hPutStrLn logfh  $ j ++ "," ++ d8 ++ "," ++ d7
             NotConnected msg -> do
               hPutStrLn logfh  $ "At " ++ show ( at d ) ++ msg
     `Ex.catch`(\e -> case e of 
@@ -569,7 +574,7 @@ logger dch = do
         logger dch
       -- | Table | Lines| Reconnect
       otherwise -> logger dch )
-      -- ^ ここでQUITエラーを捕まえていることになる？　withFileで例外は捕まえられない？ <- 捕まえている
+      -- ^ ここでQUITエラーを捕まえていることになる？　withFileで例外は捕まえられない？ <- 捕まえ，上位に送られる
     
 logFileName :: IO(FilePath)
 logFileName = do
@@ -587,29 +592,28 @@ logFileName = do
     
 displayer :: ECUDataCh -> IO ()
 displayer dch = do
-        Prelude.putStr $ vt100cr 2    -- 画面全体消去   -- Prelude.putStrLn $ "displayer Started."
-        -- Prelude.putStr $ vt100mv 2 0  -- 2行0桁へ移動
-        il <- initECUDataLog     -- ^ initial empty min-max data
-        loop dch il `Ex.catch`(\e -> case (e::UserCMD) of
-          Quit      -> do { Prelude.putStrLn $ vt100cr 2 ; return () }
-          Reconnect  -> displayer dch 
-          otherwise -> Ex.throw e )
-        where
-          -- これらの処理はディスクへの書き出しをしているLoggerとほぼ同じ，かつ結構時間を食う処理なので
-          -- パイプ処理にして途中で変換し，その結果をLoggerもdisplayerも引き取るように改造するべきか。
-          -- フォールトコードの表示や最新情報の表示をつけたので，全く同じではなくなったけど...。
-          loop :: ECUDataCh -> ECUDataLog -> IO ()
-          loop dch dl = do
-            d <- readChan dch 
-            let dl' = renew dl d
-            tableView dl' d
-            loop dch dl'
+  Prelude.putStr $ vt100cr 2    -- 画面全体消去   -- Prelude.putStrLn $ "displayer Started."
+  -- Prelude.putStr $ vt100mv 2 0  -- 2行0桁へ移動
+  il <- initECUDataLog     -- ^ initial empty min-max data
+  loop dch il `Ex.catch`(\e -> case (e::UserCMD) of
+    Quit      -> do { Prelude.putStr $ vt100mv 36 0 ; return () }
+    Reconnect -> displayer dch 
+    otherwise -> Ex.throw e )
+  where
+    -- これらの処理はディスクへの書き出しをしているLoggerとほぼ同じ，かつ結構時間を食う処理なので
+    -- パイプ処理にして途中で変換し，その結果をLoggerもdisplayerも引き取るように改造するべきか。
+    -- フォールトコードの表示や最新情報の表示をつけたので，全く同じではなくなったけど...。
+    loop :: ECUDataCh -> ECUDataLog -> IO ()
+    loop dch dl = do
+      d <- readChan dch 
+      let dl' = renew dl d
+      tableView dl' d
+      loop dch dl'
     
 renew :: ECUDataLog -> ECUData -> ECUDataLog
 renew dl d = case status d of 
-                  Connected m -> case res d of
-                    Nothing -> dl { logd = "Connected but data was empty." : logd dl }
-                    Just d' ->
+                  Connected m -> dl { logd = ("At " ++ show (at d) ++ " Connected :" ++ show m ): logd dl }
+                  GotData d'  ->  
                       let nnum   = 1 + num dl
                           ndat   = (parse80.d80 $ d' , parse7d.d7d $ d') :: ECUFrame
                           ndf    = select d dl
@@ -650,21 +654,18 @@ renew dl d = case status d of
     
                              checklog = if (engineSpeed $ parse80 $ d80 $ d') <= (engineSpeed $ ucl80 $ ucl controlLimit) 
                                         then Nothing else Just ("Error (Illegal Engine Speed Data ) at : " ++ (show (at d)))
-                  NotConnected msg -> dl { logd = ("At " ++ show (at d) ++ msg ): logd dl }
+                  NotConnected msg -> dl { logd =  msg : logd dl }
         
 lineView::ECUDataSet -> IO()
 lineView ds@(d,l) = do
-      ima <- currentTime
       case status d of
-        NotConnected m -> do { Prelude.putStrLn $ "At " ++ show ima ++ m }
-        Connected m    -> do
-          case res d of 
-            Nothing -> return ()
-            Just d' -> do
-              Prelude.putStrLn $  j ++ "," ++  d8 ++ "," ++ d7   -- wAddStr :: Window -> String -> IO ()    標準の画面に文字を出力
-              where j  = localTimetoString  $ at d
-                    d8 = frame80toTable.parse80.d80 $ d'
-                    d7 = frame7DtoTable.parse7d.d7d $ d'
+        NotConnected m -> do { Prelude.putStrLn $ "At " ++ show (at d) ++ " " ++ m }
+        Connected mdl  -> do { Prelude.putStrLn $ "At " ++ show (at d) ++ " Connected :" ++ show mdl }
+        GotData d807d  -> do 
+          Prelude.putStrLn $  j ++ "," ++  d8 ++ "," ++ d7   -- wAddStr :: Window -> String -> IO ()    標準の画面に文字を出力
+          where j  = localTimetoString  $ at d
+                d8 = frame80toTable.parse80.d80 $ d807d
+                d7 = frame7DtoTable.parse7d.d7d $ d807d
     
 -- | Escape sequence in VT100
 reset    = "\ESC[0m"
@@ -692,24 +693,31 @@ tableView::ECUDataLog -> ECUData -> IO()
 tableView l d  = do
   ima <- currentTime
   -- case status d of
-  --   NotConnected msg -> do { Prelude.putStrLn $ vt100mv 0 0 ; Prelude.putStrLn $ brev ++ msg ++ reset }
-  --   Connected m   ->
-  case res d of 
-    Nothing  -> do
-      Prelude.putStr "\BEL\BEL\BEL"
-      Prelude.putStrLn $ vt100mv 0 0
-      Prelude.putStrLn   "-----------------------------------------------"
-      Prelude.putStrLn   " MyEcu: Copyright (C)2018-2019 by Kentaro UONO "
-      Prelude.putStrLn   "-----------------------------------------------"
-      Prelude.putStrLn $ bred ++ yellow ++ " Not Connected " ++ reset ++ (printf " %3s " ( take 3 $ show $ status d ) ) ++ "at: " ++ (show $ at d) 
-      return () 
-    Just d'  -> do -- ds@(d,l) = do
+  --    NotConnected msg -> do { Prelude.putStrLn $ vt100mv 0 0 ; Prelude.putStrLn $ brev ++ msg ++ reset }
+  --    Connected m   ->
+  case status d of 
+    Connected    model    -> do 
       Prelude.putStrLn $ vt100cr 2
       Prelude.putStrLn $ vt100mv 0 0
       Prelude.putStrLn   "-----------------------------------------------"
       Prelude.putStrLn   " MyEcu: Copyright (C)2018-2019 by Kentaro UONO "
       Prelude.putStrLn   "-----------------------------------------------"
-      Prelude.putStrLn $ connected ++ "   Model       " ++ reset ++ ( printf  " %s " modelstr )
+      Prelude.putStrLn $ bgreen ++ yellow ++ " Connected     " ++ reset
+    NotConnected message  -> do
+      Prelude.putStr "\BEL\BEL\BEL"
+      Prelude.putStrLn $ vt100mv 0 0
+      Prelude.putStrLn   "-----------------------------------------------"
+      Prelude.putStrLn   " MyEcu: Copyright (C)2018-2019 by Kentaro UONO "
+      Prelude.putStrLn   "-----------------------------------------------"
+      Prelude.putStrLn $ bred ++ yellow ++ " Not Connected " ++ reset 
+      return () 
+    GotData d'  -> do -- ds@(d,l) = do
+      -- Prelude.putStrLn $ vt100cr 2
+      Prelude.putStrLn $ vt100mv 0 0
+      Prelude.putStrLn   "-----------------------------------------------"
+      Prelude.putStrLn   " MyEcu: Copyright (C)2018-2019 by Kentaro UONO "
+      Prelude.putStrLn   "-----------------------------------------------"
+      Prelude.putStrLn $ bgreen ++ yellow ++ " Connected     " ++ reset
       Prelude.putStrLn $ reset ++ "-------------- time ---------------------------"
       Prelude.putStrLn $ (printf " %6s " numl) ++ (printf " %6s " numr) ++ ": " ++ j
       Prelude.putStrLn   "-------------- 80 data ------------------------"
@@ -739,14 +747,6 @@ tableView l d  = do
       mapM_ Prelude.putStrLn $ if length log >= 5 then  take 5 log else log 
       -- Prelude.putStrLn   "-----------------------------------------------"
       where 
-        connected ::String
-        connected = case status d of 
-                      Connected _ -> yellow ++ bgreen 
-                      otherwise   -> white  ++ bred 
-        modelstr::String
-        modelstr = case status d of
-                      Connected r -> show r
-                      otherwise -> ""
         bar::Int -> Int -> Int -> String
         bar min max x = printf "  %-10s" $ take (fromIntegral (10 * x `div` (max-min))) "**********"
         tf c = if c then green ++ "True " ++ reset else red ++ "False" ++ reset
@@ -867,14 +867,14 @@ tryIO n a
                   else 
                     return r
 
-tryIOwith10msecDelay :: Int -> IO (BS.ByteString) -> IO (BS.ByteString)
-tryIOwith10msecDelay n a
+tryIOwithDelay :: Int -> IO (BS.ByteString) -> IO (BS.ByteString)
+tryIOwithDelay n a
   | n <= 0    = return BS.empty
   | otherwise = do
                   r <- a
                   if r == BS.empty then do
-                    threadDelay 10000 -- 10msec
-                    tryIOwith10msecDelay  (n-1) a
+                    threadDelay 1000 -- 1msec
+                    tryIOwithDelay  (n-1) a
                   else 
                     return r
 
@@ -968,7 +968,7 @@ dispHexLn t d = dispHex t d >> Prelude.putStrLn ""
 sendCommand :: SerialPort -> BS.ByteString -> IO (Either String Int)  
 sendCommand port cmd = do
     byteSend  <- send port cmd -- SerialPort -> B.ByteString -> IO Int
-    byteRcvd  <- tryIOwith10msecDelay 3 $ recv port 1 -- IO ByteString
+    byteRcvd  <- tryIOwithDelay 3 $ recv port 1 -- IO ByteString
     case (byteRcvd == BS.empty, byteRcvd == cmd) of
       (True, _) -> return $ Left  $ "EC: ECU did not respond for:" ++ show cmd
       (_,False) -> return $ Left  $ "EE: ECU responded illegally. " ++ show ( BS.unpack byteRcvd )++ " for:" ++ show ( BS.unpack cmd )
@@ -983,41 +983,43 @@ sendHeartBt port = do
     (_, False ) -> return  $ Left $ "EB: ECU echoed beat (" ++ show hbt ++ ") but not matched with " ++ show byteRcvd
     (_, True  ) -> return  $ Right ()
 
-initialize ::SerialPort -> IO (ECUStatus)
-initialize port  = do
+initialize ::FilePath -> IO (SerialPort, ModelData)
+initialize ecupath  = do
   -- Prelude.putStrLn $  "Now I will start initializing ECU"
-  flush port
+  port <- openSerial ecupath defaultSerialSettings {timeout= 5, flowControl = Software } 
+  -- print "openSerial done"
+  -- flush port
   jikoku1 <- currentTime
   r1 <- sendCommand port $ BS.singleton 0xca  -- 202 'ha no hankaku' 
   case r1 of
-    Left e   -> return $ NotConnected $ "E1: Initialization error when sending 1st command. " ++ e ++ "at " ++ show jikoku1
+    Left e   -> do { Prelude.putStrLn  $ "E1: Initialization error when sending 1st command. " ++ e ++ "at " ++ show jikoku1 ; Ex.throwIO Reconnect }
     oherwise -> do
       jikoku2 <- currentTime
       r2 <- sendCommand port $ BS.singleton 0x75  -- 117 'u' 
       case r2 of
-        Left e   -> return $ NotConnected $ "E2: Initialization error when sending 2nd command. " ++ e ++ "at " ++ show jikoku2
+        Left e   -> do { Prelude.putStrLn  $ "E2: Initialization error when sending 2nd command. " ++ e ++ "at " ++ show jikoku2 ; Ex.throwIO Reconnect }
         oterwise -> do
           jikokubt <- currentTime
           bt <- sendHeartBt port              -- It is heart beat. 0xf4 244
           case bt of
-            Left e   -> return $ NotConnected $ "Eb: Initialization error when sending heart beat.  " ++ e ++ "at " ++ show jikokubt
+            Left e   -> do { Prelude.putStrLn  $  "Eb: Initialization error when sending heart beat.  " ++ e ++ "at " ++ show jikokubt ; Ex.throwIO Reconnect }
             oterwise -> do
               jikoku3 <- currentTime
               r3 <- sendCommand port $ BS.singleton 0xd0  -- 208 'mi no hankaku'
               case r3 of 
-                Left e    -> return $ NotConnected $ "E3: Initialization error when sendning heart beat. " ++ e ++ "at " ++ show jikoku3
+                Left e    -> do { Prelude.putStrLn  $  "E3: Initialization error when sendning heart beat. " ++ e ++ "at " ++ show jikoku3 ; Ex.throwIO Reconnect }
                 otherwise -> do
-                  jikokum <- currentTime
+                  jikokum   <- currentTime
                   modeldata <- repeatIO 4 BS.empty (recv port 1)
                   -- modeldata <- recv port 4 -- IO ByteString -- recv :: SerialPort -> Int -> IO BS.ByteString
                   -- 上記のように単純に４バイトを指定して読み込むと，取りこぼしを起こすので，下記のよう改善。
                   -- dispHex "modeldata :" modeldata
                   if (BS.length modeldata == 4 ) then
                     case data2model modeldata of
-                      Just theModel -> return $ Connected theModel
-                      otherwise     -> return $ NotConnected $ "EM: Unknown model. the data is : " ++ show modeldata ++ "at " ++ show jikokum
+                      Just theModel -> return (port , theModel)
+                      otherwise     -> do { Prelude.putStrLn  $  "EM: Unknown model. the data is : " ++ show modeldata ++ "at " ++ show jikokum ; Ex.throwIO Reconnect }
                   else
-                    return $ NotConnected $ "E4: Initialization error. model data is not 4 bytes:" ++ show modeldata ++ "at " ++ show jikokum
+                    do { Prelude.putStrLn  $  "E4: Initialization error. model data is not 4 bytes:" ++ show modeldata ++ "at " ++ show jikokum ; Ex.throwIO Reconnect }
 
 data2model :: BS.ByteString -> Maybe ModelData
 data2model key    | key == mdb mne10078  = Just mne10078

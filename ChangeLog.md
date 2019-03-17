@@ -58,9 +58,18 @@
 -- #                         q で抜ける時，logger にフラッシュさせる
 -- #   2019.02.19 v.0.2.1.0  一旦，安定版とする。
 -- #   2019.03.09 v.0.2.1.1  テストデータモード追加。以降，GitHubにプロジェクト登録
--- #   2019.03.15 v.0.3.0.0  割り込み対策  
+-- #   2019.03.15 v.0.3.0.0  TestMode追加 - メインループやスレッド構成を見直し→読み出しエラー頻発
+-- #   2019.03.15 v.0.3.0.1  読み出しエラー対策のため割り込み対処構成見直し；依然エラー頻発。
+-- #　　2019.03.17 v.0.3.0.2  正格評価化，割り込み対策
 -- # GUI 準備 (Threepenny-guiの導入)　とりあえず動いたが，終了方法未詳。
--- # 
+-- # いきなりプラグを抜くと ecu-exe: discardData: does not exist (Device not configured)
+-- #   これはどうやら Linux, macOSの場合である。 discardData関数がシステムコールでエラーを
+-- #   受け取っている。
+-- # -- http://hackage.haskell.org/package/unix-2.7.2.2/docs/src/System.Posix.Terminal.Common.html#discardData
+-- # -- | @discardData fd queues@ calls @tcflush@ to discard
+-- # --   pending input and\/or output for @Fd@ @fd@,
+-- # --   as indicated by the @QueueSelector@ @queues@.
+
 
 ## 0.3.0.0
 
