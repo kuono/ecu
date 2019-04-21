@@ -11,7 +11,7 @@
 
 module Main where
 
-import Lib (runEcuAt , defaultUSBPath, testModeFile )
+import ECULib 
 import System.Environment (getArgs)
 import System.IO -- for stdin, Buffering Mode
 import qualified Data.ByteString as BS
@@ -22,7 +22,15 @@ import Data.Word
 import Data.List.Split
 import System.Directory
 import Numeric
-     
+
+-- | デバイス名が指定されなかった場合に使うパス名　
+defaultUSBPath   = "/dev/tty.usbserial-DJ00L8EZ" -- :: FilePath
+alterntUSBPath   = "/dev/tty.usbserial-FT90HWC8" -- :: FilePath
+
+-- | 試験モード用ダミーデータが入ったファイル名  
+testModeFile :: String
+testModeFile = "TestData.csv"
+
 main :: IO ()
 main = do
     args <- System.Environment.getArgs
@@ -34,13 +42,16 @@ main = do
             hFlush stdout
             c <- getChar
             Prelude.putStrLn ""
-            if c `elem` "yYfF" then
-                runEcuAt testModeFile
-            else 
-                runEcuAt defaultUSBPath
+            -- if c `elem` "yYfF" then
+            --     runEcuAt testModeFile
+            -- else 
+            --     runEcuAt defaultUSBPath
+            runEcuAt defaultUSBPath
+        ["-t"]       -> runEcuAt testModeFile
+        ["-d"]       -> runEcuAt defaultUSBPath
         [theEcuPort] -> runEcuAt theEcuPort
         _            -> Prelude.putStrLn "error: exactly one arguments needed." 
+    Prelude.putStrLn "Thank you. See you again! " 
     hSetBuffering stdin LineBuffering -- set buffering mode
     hSetEcho      stdin True
-    Prelude.putStrLn "Thank you. See you again! " 
     return ()

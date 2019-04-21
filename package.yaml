@@ -1,10 +1,10 @@
 name:                ecu
-version:             0.1.0.0
+version:             0.4.0.1
 github:              "githubuser/ecu"
 license:             BSD3
-author:              "Author name here"
-maintainer:          "example@example.com"
-copyright:           "2019 Author name here"
+author:              "Kentaro UONO"
+maintainer:          "info@kuono.net"
+copyright:           "2018-2019 Kentaro UONO"
 
 extra-source-files:
 - README.md
@@ -21,9 +21,20 @@ description:         Please see the README on GitHub at <https://github.com/gith
 
 dependencies:
 - base >= 4.7 && < 5
+- serialport
+- time
+- stm
+- bytestring
+- time
+- split
+- directory
+- unix
+- transformers
 
 library:
   source-dirs: src
+
+default-extensions:  Strict StrictData
 
 executables:
   ecu-exe:
@@ -35,6 +46,7 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - ecu
+    - stm
     - split
     - transformers
     - time
@@ -42,6 +54,7 @@ executables:
     - directory
     - serialport
     - unix
+    
 
 tests:
   ecu-test:

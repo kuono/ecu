@@ -4,13 +4,13 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 1b0c90127572f9fd8320ddcc30b49f172e7ec320761942f8d3ae7073ebf0f81b
+-- hash: 45d186f4ec6c9ef05113b81f1a3be147cfa584729395b63ce4c438b3f87c79bb
 
 name:           ecu
-version:        0.3.0.2
-description:    Please see the README on GitHub at <https://github.com/kuono/ecu#readme>
-homepage:       https://github.com/kuono/ecu#readme
-bug-reports:    https://github.com/kuono/ecu/issues
+version:        0.4.0.1
+description:    Please see the README on GitHub at <https://github.com/githubuser/ecu#readme>
+homepage:       https://github.com/githubuser/ecu#readme
+bug-reports:    https://github.com/githubuser/ecu/issues
 author:         Kentaro UONO
 maintainer:     info@kuono.net
 copyright:      2018-2019 Kentaro UONO
@@ -23,28 +23,28 @@ extra-source-files:
 
 source-repository head
   type: git
-  location: https://github.com/kuono/ecu
+  location: https://github.com/githubuser/ecu
 
 library
   exposed-modules:
+      ECULib
       Lib
   other-modules:
       Paths_ecu
   hs-source-dirs:
       src
+  default-extensions: Strict StrictData
   build-depends:
       base >=4.7 && <5
-    , split
     , bytestring
     , directory
     , serialport
+    , split
+    , stm
     , time
     , transformers
     , unix
-
   default-language: Haskell2010
-  default-extensions:  Strict StrictData
-
 
 executable ecu-exe
   main-is: Main.hs
@@ -52,16 +52,16 @@ executable ecu-exe
       Paths_ecu
   hs-source-dirs:
       app
+  default-extensions: Strict StrictData
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
-  default-extensions:  Strict StrictData
-
   build-depends:
       base >=4.7 && <5
-    , ecu
-    , split
     , bytestring
     , directory
+    , ecu
     , serialport
+    , split
+    , stm
     , time
     , transformers
     , unix
@@ -74,13 +74,16 @@ test-suite ecu-test
       Paths_ecu
   hs-source-dirs:
       test
+  default-extensions: Strict StrictData
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
-    , ecu
     , bytestring
     , directory
+    , ecu
     , serialport
+    , split
+    , stm
     , time
     , transformers
     , unix
