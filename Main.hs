@@ -12,7 +12,7 @@
 module Main where
 
 import ECULib 
-import System.Environment (getArgs)
+import System.Environment (getArgs,getEnv,getEnvironment)
 import System.IO -- for stdin, Buffering Mode
 import qualified Data.ByteString as BS
     
@@ -36,19 +36,24 @@ testModeFile = "TestData.csv"
 main :: IO ()
 main = do
     args <- System.Environment.getArgs
+    env  <- System.Environment.getEnv "HOME"
+    let defaultUSBPath = if env == "/Users/kuono" then defaultUSBPathMac
+                         else defaultUSBPathRaspberryPi
+    -- print env
+    -- let defaultUSBPath = defaultUSBPathMac
     case args of
         []           -> do
             hSetBuffering stdin NoBuffering -- set non buffering mode 
             hSetEcho      stdin True
-            Prelude.putStrLn "Is this environment on Mac (Y/n) ?"
-            Prelude.putStrLn $ " Y " ++ defaultUSBPathMac
-            Prelude.putStrLn $ " n " ++ defaultUSBPathRaspberryPi
-            hFlush stdout
-            c <- getChar
-            Prelude.putStrLn ""
-            let defaultUSBPath = 
-              if c 'elem' "yYfF" then defaultUSBPathMac
-                                 else defaultUSBPathRaspberryPi
+            -- Prelude.putStrLn "Is this environment on Mac (Y/n) ?"
+            -- Prelude.putStrLn $ " Y " ++ defaultUSBPathMac
+            -- Prelude.putStrLn $ " n " ++ defaultUSBPathRaspberryPi
+            -- hFlush stdout
+            -- c <- getChar
+            -- Prelude.putStrLn ""
+            -- let defaultUSBPath = 
+            --   if c 'elem' "yYfF" then defaultUSBPathMac
+            --                      else defaultUSBPathRaspberryPi
             -- Prelude.putStr "Test with testModeFile.csv ? (y/N)"
             -- hFlush stdout
             -- c <- getChar

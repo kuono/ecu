@@ -4,10 +4,10 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 180484213e3b53d950f915ee17f31a13fa050df1a22c9df059db9ad8575c2f48
+-- hash: 83426722d2fde55325504d3f0d1acaae31c60b2de122a72524a2e5db677eaa19
 
 name:           ecu
-version:        0.4.0.2
+version:        0.4.0.3
 description:    Please see the README on GitHub at <https://github.com/githubuser/ecu#readme>
 homepage:       https://github.com/githubuser/ecu#readme
 bug-reports:    https://github.com/githubuser/ecu/issues

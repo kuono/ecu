@@ -177,7 +177,7 @@ runEcuAt :: String  -- ^ ECUにつながったシリアルポート（USB経由�
 runEcuAt path = do 
   exist <- doesFileExist path
   if not exist then
-    do { Prelude.putStrLn "Device does not exist. Check USB plug and/or serial cable connection." ; return () } 
+    do { Prelude.putStrLn $ "Device does not exist. Check USB plug and/or serial cable connection at :" ++ path ; return () } 
   else
     do
       datach  <- newChan :: IO (Chan Model) -- outlet chanel for sending the Model
@@ -750,7 +750,7 @@ ima = ECUResponse ( Right `liftM` currentTime )
 currentTime :: IO LocalTime
 currentTime = do
   timezone <- getCurrentTimeZone
-  utctime  <- getCurrentTime
+  utctime  <- getCurrentTime -- <$> getCurrentTimeZone
   return $ utcToLocalTime timezone utctime
 
 -- | to convert constant length string
