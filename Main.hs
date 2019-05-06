@@ -24,7 +24,8 @@ import System.Directory
 import Numeric
 
 -- | デバイス名が指定されなかった場合に使うパス名　
-defaultUSBPath   = "/dev/tty.usbserial-DJ00L8EZ" -- :: FilePath
+defaultUSBPath   = "/dev/tty.usbserial-DO01OV70" :: FilePath 
+oldUSBPath   = "/dev/tty.usbserial-DJ00L8EZ" -- :: FilePath
 alterntUSBPath   = "/dev/tty.usbserial-FT90HWC8" -- :: FilePath
 
 -- | 試験モード用ダミーデータが入ったファイル名  
@@ -51,7 +52,8 @@ main = do
         ["-d"]       -> runEcuAt defaultUSBPath
         [theEcuPort] -> runEcuAt theEcuPort
         _            -> Prelude.putStrLn "error: exactly one arguments needed." 
-    Prelude.putStrLn "Thank you. See you again! " 
+    Prelude.putStrLn $ ( vt100mv 37 0 ) ++  "Thank you. See you again! " 
     hSetBuffering stdin LineBuffering -- set buffering mode
     hSetEcho      stdin True
     return ()
+    where vt100mv l c = "\ESC[" ++ (show l) ++ ";" ++ (show c) ++ "H"

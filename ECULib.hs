@@ -81,7 +81,7 @@ data Frame80  = Frame80 {
                       throttlePot :: Float , -- 0x09	Throttle pot voltage, 0.02V per LSB. WOT should probably be close to 0xFA or 5.0V.
                       idleSwitch  :: Bool ,-- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
                       unknown0B   :: Word8,-- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
-                      pnClosed    :: Bool ,-- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
+                      pnClosed    :: Word8,-- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
                       -- Fault codes. On the Mini SPi, only two bits in this location are checked:             
                       faultCode1  :: Bool ,-- 0x0D  * Bit 0: Coolant temp sensor fault (Code 1)
                       faultCode2  :: Bool ,--       * Bit 1: Inlet air temp sensor fault (Code 2)
@@ -104,11 +104,12 @@ data Frame80  = Frame80 {
 data Frame7d  = Frame7d {                -- Byte position, Field
   size_7d       :: Int,  -- 0x00, size of data frame, including this byte
   lambda_voltage:: Int,  -- This lambda value is a calculated value (if it is the same as the British emissions test).     And a value of, say, 1.05, suggests it is 5% too lean.   But, if your oxygen (and CO and HC) readings are all good, then it suggests your high lambda reading is because of a leak in the exhaust wgich pulls in fresh air (and oxygen).     You could try starting your car when it is cold and put your hand over the exhaust pipe and look underneath to see if water is leaking from any if the joints. 
-  closed_loop'  :: Int,  
-  fuel_trim'    :: Int 
+  closed_loop'  :: Int,  -- 0 : Open Loop, others : Closed Loop  
+  fuel_trim'    :: Int
   -- idle_base_pos :: Int
   } deriving Show
-    
+
+data Loop        = OpenLoop | ClosedLoop deriving (Show)
 type Data80      = BS.ByteString
 type Data7d      = BS.ByteString
 
@@ -189,28 +190,33 @@ runEcuAt path = do
       hSetEcho      stdin False
 
       loopECUwith (lid, did, cid, datach )     --  event driven style main commander loop as follows
-  `Ex.catch` \e -> case (e::UserCommand) of
-    Quit       -> return ()
-    Reconnect  -> runEcuAt path
-    otherwise  -> Ex.throw e
+  `Ex.catches`  [ Ex.Handler ( \e -> case (e::UserCommand) of
+                            Quit       -> return ()
+                            Reconnect  -> runEcuAt path
+                            otherwise  -> Ex.throw e),
+                  Ex.Handler ( \e -> case (e::Ex.IOException) of
+                            _ ->  print e
+                            ) ]
   where
         loopECUwith  (lid, did, cid, datach ) = 
           forever $ do -- 引数でのデータの引き回しは早急になくしたい
             ch <- getChar
             case ch of
-              '\ESC'    -> do { Ex.throwTo cid Quit ; Ex.throwTo lid (Quit) ; Ex.throwTo did Quit ; Ex.throw Quit }
-              'q'       -> do { Ex.throwTo cid Quit ; Ex.throwTo lid (Quit) ; Ex.throwTo did Quit ; Ex.throw Quit }
-              '\''      -> do { Ex.throwTo cid Quit ; Ex.throwTo lid (Quit) ; Ex.throwTo did Quit ; Ex.throw Quit }
+              '\ESC'    -> do { Ex.throwTo cid Quit ; Ex.throwTo lid Quit ; Ex.throwTo did Quit ; Ex.throw Quit }
+              'q'       -> do { Ex.throwTo cid Quit ; Ex.throwTo lid Quit ; Ex.throwTo did Quit ; Ex.throw Quit }
+              '\''      -> do { Ex.throwTo cid Quit ; Ex.throwTo lid Quit ; Ex.throwTo did Quit ; Ex.throw Quit }
               '0'       -> do { Ex.throwTo cid $ ECUCommand { command = ClearFaults } }
               -- quit command issued. single quote key on dvorak layout is located at 'q' location of qwerty keyboard. 
               ' '       -> do -- {killThread cid ; cid' <- forkIO $ communicateWith path dch; loopECUwith dch (lid,did,cid') } 
-                            Ex.throwTo cid Quit
-                            cid' <- forkIO $ communicateWith path datach
-                            loopECUwith (lid, did, cid', datach )
+                            Ex.throwTo cid Reconnect
+                            -- threadDelay 1000000 -- 1sec
+                            -- cid' <- forkIO $ communicateWith path datach
+                            -- loopECUwith (lid, did, cid', datach )
               '\n'      -> do 
-                            Ex.throwTo cid Quit -- writeTChan cmdch Quit
-                            cid' <- forkIO $ communicateWith path datach
-                            loopECUwith (lid, did, cid', datach )
+                            Ex.throwTo cid Reconnect
+                            -- threadDelay 1000000 -- 1sec
+                            -- cid' <- forkIO $ communicateWith path datach
+                            -- loopECUwith (lid, did, cid', datach )
               otherwise -> do { return () }
 -- -------------------------
 -- -- | Core Function  
@@ -269,7 +275,19 @@ communicateWith dev outlet =
                                   , ECULib.log = "Try reconnect" : ECULib.log prevModel }
                                 communicateWith dev outlet
                                 Ex.throwIO Reconnect -- ECUが停止した後にReconnectが発行された場合の例外を抑止
-                              Quit         -> do { return () }
+                              Quit         -> do 
+                                flush ecu
+                                tryECU 64 "read out data" $ ecuRecv ecu 1
+                                closeSerial ecu 
+                                threadDelay 1000000
+                                jikokuc <- currentTime
+                                writeChan outlet $ Model { 
+                                    num = num prevModel + 1 
+                                  , dat = ECUData { status = NotConnected ( "ECU port closed for quit at " ++ show jikokuc ) , at  = jikokuc }
+                                  , ECULib.log = "Closed Port to quit" : ECULib.log prevModel }
+                                communicateWith dev outlet
+                                Ex.throwIO Quit
+                                return ()
                               ECUCommand c -> case (c::ECUCommand) of
                                 ClearFaults -> do
                                                 ioEither $ clearECUFaults ecu
@@ -279,7 +297,6 @@ communicateWith dev outlet =
                                                   , dat = ECUData { status = CommandIssued "ClearFaults" , at = jikoku }
                                                   , ECULib.log = ( "Clear Fault command issued. at " ++ show jikoku ) : ECULib.log prevModel }
                                                 communicateWith dev outlet
-                              otherwise    -> do { Ex.throwIO e }
 
 withECU :: FilePath -> ( (SerialPort,ModelData,Model) -> IO () ) -> IO ()
 withECU dev = Ex.bracket
@@ -398,35 +415,33 @@ tableView model  = do
   Prelude.putStrLn $ vt100mv 0 0
   Prelude.putStrLn   "-----------------------------------------------"
   Prelude.putStrLn   " MyEcu: Copyright (C)2018-2019 by Kentaro UONO "
-  Prelude.putStrLn   "-----------------------------------------------"
-  Prelude.putStrLn   statusString
   Prelude.putStrLn   "-------------- time ---------------------------"
-  Prelude.putStrLn $ (printf " %6s " numl) ++ (printf " %6s " numr) ++ ": " ++ j
+  Prelude.putStrLn $ (printf " %6s " numl) ++ (printf " %6s " numr) ++ ": " ++ j ++ " " ++ statusString
   case status $ dat model of 
     GotData theData -> do
       Prelude.putStrLn   "-------------- 80 data ------------------------"
-      Prelude.putStrLn $ (printf "   Engine Speed(rpm):  %5d"   (engineSpeed d8 )) ++ ( bar   0  4000 ( engineSpeed d8 ))
-      Prelude.putStrLn $ (printf "throttle Potent( V ):  %5.2f" (throttlePot d8 )) ++ ( bar   0    50 ( truncate ( 10 * (throttlePot d8 ))))
-      Prelude.putStrLn $ (printf "   Coolant Temp(dgC):    %3d" (coolantTemp d8 )) ++ ( bar (-55) 100 ( coolantTemp d8 ))
-      Prelude.putStrLn $ (printf "   ambient Temp(dgC):    %3d" (ambientTemp d8 )) ++ ( bar (-55) 100 ( ambientTemp d8 ))
-      Prelude.putStrLn $ (printf "intake Air Temp(dgC):    %3d" (intakeATemp d8 )) ++ ( bar (-55) 100 ( intakeATemp d8 ))
-      Prelude.putStrLn $ (printf "     map Sensor(kPa):    %3d" (mapSensor   d8 )) ++ ( bar   0   130 ( mapSensor   d8 ))
+      Prelude.putStrLn $ (printf "   Engine Speed (rpm) :  %5d"   (engineSpeed d8 )) ++ ( bar   0  4000 ( engineSpeed d8 ))
+      Prelude.putStrLn $ (printf "throttle Potent ( V ) :  %5.2f" (throttlePot d8 )) ++ ( bar   0    50 ( truncate ( 10 * (throttlePot d8 ))))
+      Prelude.putStrLn $ (printf "   Coolant Temp (dgC) :    %3d" (coolantTemp d8 )) ++ ( bar (-55) 100 ( coolantTemp d8 ))
+      Prelude.putStrLn $ (printf "   ambient Temp (dgC) :    %3d" (ambientTemp d8 )) ++ ( bar (-55) 100 ( ambientTemp d8 ))
+      Prelude.putStrLn $ (printf "intake Air Temp (dgC) :    %3d" (intakeATemp d8 )) ++ ( bar (-55) 100 ( intakeATemp d8 ))
+      Prelude.putStrLn $ (printf "     map Sensor (kPa) :    %3d" (mapSensor   d8 )) ++ ( bar   0   130 ( mapSensor   d8 ))
       Prelude.putStrLn $ volt                                                 ++ ( bar   0   200 ( truncate ( 10 * ( battVoltage d8 ))))
-      Prelude.putStrLn $ (printf "    idle switch     :  %5s"   (closedorclear (idleSwitch  d8 )))
-      Prelude.putStrLn $ (printf "     park or neutral:  %5s"   (parkorneutral (pnClosed    d8 )))
-      Prelude.putStrLn $ (printf "idl Air Ctl M P(C/O):    %3d" (idleACMP    d8 )) ++ (bar   0  180 ( idleACMP   d8 ))
-      Prelude.putStrLn $ (printf "idl Spd deviatn     :  %5d"   (idleSpdDev  d8 )) ++ (bar   0 1000 ( idleSpdDev d8 ))
-      Prelude.putStrLn $ (printf "ignition advnce(deg): %6.2f"  (ignitionAd  d8 )) ++ (bar   0   20 ( truncate (ignitionAd d8 )))
-      Prelude.putStrLn $ (printf "      coil Time(msc):  %5.2f" (coilTime    d8 )) ++ (bar   0   20 ( truncate (coilTime   d8 )))
+      Prelude.putStrLn $ (printf "    idle switch       :  %5s"   (closedorclear (idleSwitch  d8 )))
+      Prelude.putStrLn $ (printf " park or neutral? A/C?:  %5s"   (parkorneutral (pnClosed    d8 ))) ++ ( aconoff (pnClosed d8))
+      Prelude.putStrLn $ (printf "idl Air Ctl M P(C/O)  :    %3d" (idleACMP    d8 )) ++ (bar   0  180 ( idleACMP   d8 ))
+      Prelude.putStrLn $ (printf "idl Spd deviatn       :  %5d"   (idleSpdDev  d8 )) ++ (bar   0 1000 ( idleSpdDev d8 ))
+      Prelude.putStrLn $ (printf "ignition advnce (deg) : %6.2f"  (ignitionAd  d8 )) ++ (bar   0   20 ( truncate (ignitionAd d8 )))
+      Prelude.putStrLn $ (printf "      coil Time (msc) :  %5.2f" (coilTime    d8 )) ++ (bar   0   20 ( truncate (coilTime   d8 )))
+      Prelude.putStrLn           " 0B 0F 10 11 15 19 1A 1B"
+      Prelude.putStrLn $ (printf " %2x %2x %2x %2x %2x %2x %2x %2x" (unknown0B d8) (unknown0F d8) (unknown10 d8) (unknown11 d8) (unknown15 d8) (unknown19 d8) (unknown1A d8) (unknown1B d8) )
       Prelude.putStrLn   "-------------- 7D data ------------------------"
-      Prelude.putStrLn $ (printf " lambda voltage( mV):    %3d  " (lambda_voltage d7 )) ++ ( richorlean ( lambda_voltage d7 ))
-      Prelude.putStrLn $ (printf "    closed loop(C/O):    %3d" (closed_loop'   d7 )) -- ++ (printf "   %3d    %3d" (closed_loop'   d7x) (closed_loop'   d7m) )
-      Prelude.putStrLn $ (printf "      fuel trim( %% ):    %3d" (fuel_trim'     d7 )) ++ (bar  0 500 ( fuel_trim' d7 )) --(printf "   %3d    %3d" (fuel_trim'     d7x) (fuel_trim'     d7m) )
+      Prelude.putStrLn $ (printf " lambda voltage ( mV) :    %3d  " (lambda_voltage d7 )) ++ ( richorlean ( lambda_voltage d7 ))
+      Prelude.putStrLn $ (printf "      closed loop     :    %3d  " (closed_loop'   d7 )) ++ ( openorclosed ( closed_loop' d7  )) 
+      Prelude.putStrLn $ (printf "      fuel trim ( %% ) :    %3d"  (fuel_trim'     d7 )) ++ (bar  0 500 ( fuel_trim' d7 )) --(printf "   %3d    %3d" (fuel_trim'     d7x) (fuel_trim'     d7m) )
       Prelude.putStrLn $ "- Fault Code ----------------------------------"
-      Prelude.putStrLn $ " (01) Coolant temp Sensor      | " ++ e01
-      Prelude.putStrLn $ " (02) Air temp sensor          | " ++ e02
-      Prelude.putStrLn $ " (10) Fuel pump circuit        | " ++ e10
-      Prelude.putStrLn $ " (16) Throttle position sensor | " ++ e16
+      Prelude.putStrLn $ " (01) Coolant temp Sensor      | " ++ e01 ++ " (02) Air temp sensor          | " ++ e02
+      Prelude.putStrLn $ " (10) Fuel pump circuit        | " ++ e10 ++ " (16) Throttle position sensor | " ++ e16
       Prelude.putStrLn $ "  Press '0' to clear fault codes "
       where 
         theData = case status ( dat model ) of 
@@ -435,26 +450,32 @@ tableView model  = do
         d8   = parse80.d80 $ theData
         d7   = parse7d.d7d $ theData
         b    = battVoltage d8
-        bs   = printf "battery Voltage( V ):  %5.2f" b
+        bs   = printf "battery Voltage ( V ) :  %5.2f" b
         bell = if (b > 15.0 || b < 9.0 ) then "" else "" -- \BEL\BEL\BEL" else "\BEL"  
         volt = if (b > 15.0 || b < 9.0 ) then red ++ bs ++ reset else bs
-        e01 = if faultCode1 d8  then green ++ "__" ++ reset else red ++ "■■" ++ reset -- (01) Coolant temp Sensor 
-        e02 = if faultCode2 d8  then green ++ "__" ++ reset else red ++ "■■" ++ reset -- (02) Air temp sensor 
-        e10 = if faultCode10 d8 then green ++ "__" ++ reset else red ++ "■■" ++ reset -- (10) Fuel pump cirkit 
-        e16 = if faultCode16 d8 then green ++ "__" ++ reset else red ++ "■■" ++ reset -- (16) Throttle position sensor 
+        e01 = errorornoerror $ faultCode1  d8  -- (01) Coolant temp Sensor 
+        e02 = errorornoerror $ faultCode2  d8 -- (02) Air temp sensor 
+        e10 = errorornoerror $ faultCode10 d8 -- (10) Fuel pump cirkit 
+        e16 = errorornoerror $ faultCode16 d8 -- (16) Throttle position sensor 
+        errorornoerror :: Bool -> String
+        errorornoerror b = if b then bred ++ yellow ++ " E R R O R " ++ reset else bgreen ++ yellow ++ " No ERROR  " ++ reset
         bar::Int -> Int -> Int -> String
         bar min max x = printf "  %-10s" $ take (fromIntegral (10 * x `div` (max-min))) "**********"
         tf c = if c then green ++ "True " ++ reset else red ++ "False" ++ reset
         closedorclear::Bool -> String
         closedorclear b = if b then " Closed" else " Other "
-        parkorneutral::Bool -> String -- 0 is closed
-        parkorneutral b = if b then " Closed" else " Open  "
+        parkorneutral::Word8 -> String -- 0 is closed
+        parkorneutral b = if b == 0 then " Closed" else " Open  "
+        aconoff::Word8 -> String
+        aconoff       d = if d == 0 then bblue ++ yellow ++ " a/c on   " ++ reset else bgreen ++ yellow ++ " a/c off  " ++ reset
         richorlean::Int -> String
-        richorlean v = if v >= 450 then bred ++ green ++ " rich     " ++ reset else bgreen ++ yellow ++ " lean     " ++ reset
+        richorlean v   = if v >= 450 then bred ++ green  ++ " rich     " ++ reset else bgreen ++ yellow ++ " lean     " ++ reset
+        openorclosed::Int -> String
+        openorclosed d = if d == 0   then bred ++ green  ++ "Crl wt FDt" ++ reset else bgreen ++ yellow ++ "Crl wt O2d" ++ reset
     otherwise -> return ()
-  Prelude.putStrLn $ ( vt100mv 32 0 ) ++ "----------------- Log -------------------------"
-  mapM_ Prelude.putStrLn $ if length logs >= 5 then  take 5 logs else logs
-  Prelude.putStrLn $ ( vt100mv 38 0 ) ++ "-----------------------------------------------"
+  Prelude.putStrLn $ ( vt100mv 30 0 ) ++ "----------------- Log -------------------------"
+  mapM_ Prelude.putStrLn $ map ( take 40 ) (if length logs >= 5 then  take 5 logs else logs)
+  Prelude.putStrLn $ ( vt100mv 36 0 ) ++ "-----------------------------------------------" ++ ( vt100mv 3 0 )
   where 
         statusString =  case status $ dat model of 
           Connected    model    -> bgreen ++ yellow ++ " Connected       " ++ reset ++ show model ++ (vt100lc 0)
@@ -466,10 +487,10 @@ tableView model  = do
         logs = ECULib.log model
         numr = if odd $ num model       then (bwhite ++ black ++ nums ++ reset ) else nums
         numl = if not . odd $ num model then (bwhite ++ black ++ nums ++ reset ) else nums
-        j    = show . at $ dat model
+        j    = take 26 $ (show . at $ dat model) ++ "000"
 
 frame80Title  = "E Speed,coolant T,ambient T,intakeAir T,fuel T,map Sensor,btVolt,throtle Pot,idle Swch,0B,p/n switch, CTS E,IATS E, FPC E, TPC E,0F,10,11,iACMP,iSDev,15,ignAd,coil T,19,1A,1B"
-frame80Fmt    = "%5d,%3d,%3d,%3d,%3d,%3d,%6.2f,%6.2f,%c,%02X,%c,%c,%c,%c,%c,%02X,%02X,%02X,%3d,%6d,%02X,%5.1f,%5.1f,%02X,%02X,%02X"
+frame80Fmt    = "%5d,%3d,%3d,%3d,%3d,%3d,%6.2f,%6.2f,%c,%02X,%3d,%c,%c,%c,%c,%02X,%02X,%02X,%3d,%6d,%02X,%5.1f,%5.1f,%02X,%02X,%02X"
 -- | Escape sequence in VT100
 reset    = "\ESC[0m"
 brev     = "\ESC[7m"  --  set reverse
@@ -505,7 +526,7 @@ frame80toTable f = {-# SCC "frame80toTable" #-}
     (throttlePot f ) -- ::Float
     (tf (idleSwitch  f )) -- ::Bool ,-- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
     (unknown0B       f )  -- ::Word8,-- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
-    (tf (pnClosed    f )) -- 0x0C ::Park/neutral switch. Zero is closed, nonzero is open.
+    (pnClosed    f ) -- 0x0C ::Park/neutral switch. Zero is closed, nonzero is open.
     (tf (faultCode1  f )) -- 0x0D * Bit 0: Coolant temp sensor fault (Code 1)
     (tf (faultCode2  f )) --      * Bit 1: Inlet air temp sensor fault (Code 2)
     (tf (faultCode10 f )) -- 0x0E * Bit 1: Fuel pump circuit fault (Code 10)
@@ -524,7 +545,7 @@ frame80toTable f = {-# SCC "frame80toTable" #-}
     where tf c = if c then 'T' else 'F'
 
 frame7DTitle = "lmdvt,clsdl,fuelt"
-frame7DFmt   = "%5d,%5d,%5d"
+frame7DFmt   = "%5d,%3d,%5d"
 
 frame7DtoTable :: Frame7d -> String
 frame7DtoTable f =  {-# SCC "frame7DtoTable" #-}
@@ -568,7 +589,7 @@ parse80 d =  {-# SCC "parse80" #-}
           throttlePot = 0.02 * (fromIntegral $ BS.index d 9)::Float,      -- 0x09	Throttle pot voltage, 0.02V per LSB. WOT should probably be close to 0xFA or 5.0V.
           idleSwitch  = testBit (BS.index d 10) 4, -- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
           unknown0B   = BS.index d 11, -- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
-          pnClosed    = BS.index d 12 == 0, -- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
+          pnClosed    = BS.index d 12, -- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
           faultCode1  = testBit (BS.index d 13) 0, -- Coolant temp sensor
           faultCode2  = testBit (BS.index d 13) 1, -- Air temp sensor 
           faultCode10 = testBit (BS.index d 14) 1, -- Fules pump cirkit
@@ -799,7 +820,7 @@ controlLimits     = ControlLimit {
                              size_80     = 0x1c  , engineSpeed = 6000  , coolantTemp = 100
                            , ambientTemp = 70    , intakeATemp = 70    , fuelTemp    = 70
                            , mapSensor   = 255   , battVoltage = 30.0  , throttlePot = 7.0
-                           , idleSwitch  = True  , unknown0B   = 0xff  , pnClosed    = True
+                           , idleSwitch  = True  , unknown0B   = 0xff  , pnClosed    = 0x01
                            , faultCode1  = True  , faultCode2  = True  , faultCode10 = True
                            , faultCode16 = True  , unknown0F   = 0xff  , unknown10   = 0xff
                            , unknown11   = 0xff  , idleACMP    = 190   , idleSpdDev  = 0xffff
@@ -813,7 +834,7 @@ controlLimits     = ControlLimit {
                             size_80     = 0x1c  , engineSpeed = 200   , coolantTemp = 25
                           , ambientTemp = 25    , intakeATemp = 25    , fuelTemp    = 25
                           , mapSensor   = 0     , battVoltage = 0.0   , throttlePot = 0.0
-                          , idleSwitch  = True  , unknown0B   = 0x00  , pnClosed    = True
+                          , idleSwitch  = True  , unknown0B   = 0x00  , pnClosed    = 0x00
                           , faultCode1  = True  , faultCode2  = True  , faultCode10 = True
                           , faultCode16 = True  , unknown0F   = 0x00  , unknown10   = 0x00
                           , unknown11   = 0x00  , idleACMP    = 0     , idleSpdDev  = 0x0000
@@ -821,7 +842,7 @@ controlLimits     = ControlLimit {
                           , unknown19   = 0x00  , unknown1A   = 0x00  , unknown1B   = 0x00
                          } , lcl7d = Frame7d {
                             size_7d        = 0x20 , lambda_voltage = 1000
-                          , closed_loop'   = 1    , fuel_trim'     = 105 }
+                          , closed_loop'   = 0    , fuel_trim'     = 105 }
                          }
     }
 data UCLSet       = UCLSet { ucl80 ::Frame80, ucl7d ::Frame7d}
@@ -832,7 +853,7 @@ emptyFrame80 :: Frame80
 emptyFrame80 = Frame80 { 
       size_80  = 0 , engineSpeed = 0 , coolantTemp = 0 , ambientTemp = 0 , intakeATemp = 0 ,
       fuelTemp = 0 , mapSensor   = 0 , battVoltage = 0.0 , throttlePot = 0.0 , idleSwitch  = False ,
-      unknown0B   = 0 , pnClosed    = False , faultCode1  = False , faultCode2  = False ,
+      unknown0B   = 0 , pnClosed    = 0 , faultCode1  = False , faultCode2  = False ,
       faultCode10 = False , faultCode16 = False , unknown0F   = 0 , unknown10   = 0 ,
       unknown11   = 0 , idleACMP    = 0 , idleSpdDev  = 0 , unknown15   = 0 , ignitionAd  = 0.0 ,
       coilTime    = 0.0 , unknown19   = 0 , unknown1A   = 0 , unknown1B   = 0

@@ -82,6 +82,19 @@ data Frame80  = Frame80 {
     -- https://mechanics.stackexchange.com/questions/23933/how-do-lambda-sensors-work
     Lambda sensors work at elevated temperatures, around 300 °C (600 °F); many lambda sensors contain a resistive heater element to help get them up to temperature quickly.
 
+[インジェクションシステムのクローズドループについて]
+http://www.lightcycle.jp/old/blog/2011/1228-2039.php
+ナローバンドシステム⇒ナローバンドの０２センサーが使用されるシステムです。
+ワ[イ]ドバンドにくらべて測定できる空燃比が限られており、走行の一部の領域でのみ
+０２センサーの補正が入るものとなります。
+
+０２センサーの補正が入れられない領域としては、アクセルを大きくあけて高回転に
+加速していくなどの状態があげられます。
+このような領域ではあらかじめコンピューターに入力されている固定データで制御される
+ことになります。
+
+この０２センサー制御の入らない状態をオープンループと呼びます。
+
 Narrowband
 
 These qualitatively detect whether the exhaust gases are rich or lean.
