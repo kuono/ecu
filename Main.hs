@@ -24,7 +24,8 @@ import System.Directory
 import Numeric
 
 -- | デバイス名が指定されなかった場合に使うパス名　
-defaultUSBPath   = "/dev/tty.usbserial-DO01OV70" :: FilePath 
+defaultUSBPathMac         = "/dev/tty.usbserial-DO01OV70" :: FilePath 
+defaultUSBPathRaspberryPi = "/dev/ttyUSB0" :: FilePath
 oldUSBPath   = "/dev/tty.usbserial-DJ00L8EZ" -- :: FilePath
 alterntUSBPath   = "/dev/tty.usbserial-FT90HWC8" -- :: FilePath
 
@@ -39,10 +40,19 @@ main = do
         []           -> do
             hSetBuffering stdin NoBuffering -- set non buffering mode 
             hSetEcho      stdin True
-            Prelude.putStr "Test with testModeFile.csv ? (y/N)"
+            Prelude.putStrLn "Is this environment on Mac (Y/n) ?"
+            Prelude.putStrLn $ " Y " ++ defaultUSBPathMac
+            Prelude.putStrLn $ " n " ++ defaultUSBPathRaspberryPi
             hFlush stdout
             c <- getChar
             Prelude.putStrLn ""
+            let defaultUSBPath = 
+              if c 'elem' "yYfF" then defaultUSBPathMac
+                                 else defaultUSBPathRaspberryPi
+            -- Prelude.putStr "Test with testModeFile.csv ? (y/N)"
+            -- hFlush stdout
+            -- c <- getChar
+            -- Prelude.putStrLn ""
             -- if c `elem` "yYfF" then
             --     runEcuAt testModeFile
             -- else 

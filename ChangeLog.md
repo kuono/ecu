@@ -102,6 +102,14 @@
 - HDMIモニターでの表示用に，若干行数を縮めた。
 - 閉じたシリアルポートを再度閉じようとして起こしている例外の捕捉コードを追加
 
+## 0.4.0.3
+
+2019.05.06 v.0.4.0.4
+
+- エラーが出た後，標準表示の際にエラー表示が残る部分（engine speed)の表示後続部分リセット追加
+- RaspberryPi での動作確認開始
+- RaspberryPi のデバイスパスが macOS と異なることの対応
+
 ecu-exe: Data.ByteString.index: index too large: 10, length = 9
 CallStack (from HasCallStack):**        
   error, called at libraries/bytestring/Data/ByteString.hs:1877:23 in bytestring-0.10.8.2:Data.ByteString

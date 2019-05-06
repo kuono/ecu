@@ -420,7 +420,7 @@ tableView model  = do
   case status $ dat model of 
     GotData theData -> do
       Prelude.putStrLn   "-------------- 80 data ------------------------"
-      Prelude.putStrLn $ (printf "   Engine Speed (rpm) :  %5d"   (engineSpeed d8 )) ++ ( bar   0  4000 ( engineSpeed d8 ))
+      Prelude.putStrLn $ (printf "   Engine Speed (rpm) :  %5d"   (engineSpeed d8 )) ++ ( bar   0  4000 ( engineSpeed d8 )) ++ reset ++ vt100lc 0
       Prelude.putStrLn $ (printf "throttle Potent ( V ) :  %5.2f" (throttlePot d8 )) ++ ( bar   0    50 ( truncate ( 10 * (throttlePot d8 ))))
       Prelude.putStrLn $ (printf "   Coolant Temp (dgC) :    %3d" (coolantTemp d8 )) ++ ( bar (-55) 100 ( coolantTemp d8 ))
       Prelude.putStrLn $ (printf "   ambient Temp (dgC) :    %3d" (ambientTemp d8 )) ++ ( bar (-55) 100 ( ambientTemp d8 ))
