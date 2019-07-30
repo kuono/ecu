@@ -1,5 +1,5 @@
 name:                ecu
-version:             0.4.0.3
+version:             0.5.0
 github:              "githubuser/ecu"
 license:             BSD3
 author:              "Kentaro UONO"
@@ -30,6 +30,12 @@ dependencies:
 - directory
 - unix
 - transformers
+- brick
+- vty
+- containers
+- microlens
+- linear
+- vector
 
 library:
   source-dirs: src
@@ -54,6 +60,11 @@ executables:
     - directory
     - serialport
     - unix
+    - brick
+    - vty
+    - containers
+    - microlens
+    - linear
     
 
 tests:

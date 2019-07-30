@@ -51,7 +51,7 @@ data Frame80  = Frame80 {
 
 
     --
-    -- 【各種センサーの役割や信号の意味】  http://www.geocities.jp/dmxbd452/injection.html より
+    -- 各種センサーの役割や信号の意味 <http://www.geocities.jp/dmxbd452/injection.html> より
     -- クランク角センサー　約１，３～１，５KΩ　点火、燃料噴射の為の基本センサー　故障時　始動不良。
     --                　数Ωにショートしている場合、リレーモジュールよりカチャカチャ異音発生しアクセルONでも回転上がらず。
     -- MAPセンサー　　　　ECU内部に有るセンサー。点火時期、噴射時間調整の為の最重要センサー。　インテークマニホールドの負圧で電圧変化。
@@ -82,8 +82,27 @@ data Frame80  = Frame80 {
     -- https://mechanics.stackexchange.com/questions/23933/how-do-lambda-sensors-work
     Lambda sensors work at elevated temperatures, around 300 °C (600 °F); many lambda sensors contain a resistive heater element to help get them up to temperature quickly.
 
+[Rover Mini Electlic Fuel Injection について ]<http://www.tmsmini.com/cooper/sp_acr.htm> より
+
+- 各種データについて（１）-- Rover Pod 1より
+-- RPM            : エンジン回転数
+-- Idle Switch    : アイドル時，Closed 。93年以前の SPI では Idle Switch が設置されていないため，ECUはTPSを代わりに使用。
+-- P/N Switch     : スタートアップ時，Closed. オートマのみ。マニュアル車は直結。
+-- MAP Sensor     : Strategy manifold 圧（kPa)。期待値はキーオン時，100kPa, 高アイドル時30kPa
+-- Coolant temp   : 摂氏温度
+-- Inlet Air temp : 摂氏温度。エンジンが温まった時の期待値：20〜50度
+-- Ambient temp   : 他のセンサ値を元にした計算値。摂氏温度。エンジンオフ時，200度。
+-- Battery Voltage: バッテリ電圧
+-- Throttle Pot   : 電圧
+-- Lambda Volts   : 酸素センサ（触媒前のBank 1に設置）のO2電圧(mV)
+
+- 各種データについて（２）（抜粋） -- ワークショップマニュアルより
+-- Idle speed controlled by ECU   : 850 +/- 25 rpm
+-- Exhaust gas CO content at idle : 05% max Not adjustable
+-- Throttle potentionmeter voltage: Closed : 0 to 1V, Open : 4 to 5V
+
 [インジェクションシステムのクローズドループについて]
-http://www.lightcycle.jp/old/blog/2011/1228-2039.php
+<http://www.lightcycle.jp/old/blog/2011/1228-2039.php>
 ナローバンドシステム⇒ナローバンドの０２センサーが使用されるシステムです。
 ワ[イ]ドバンドにくらべて測定できる空燃比が限られており、走行の一部の領域でのみ
 ０２センサーの補正が入るものとなります。
@@ -111,11 +130,11 @@ The rarer titania-based variant does not generate its own voltage, but changes e
 low resistance = rich condition, high resistance = lean condition
 
 [Air–fuel ratio meter] wikipedia
-https://en.wikipedia.org/wiki/Air%E2%80%93fuel_ratio_meter#Zirconia_oxygen_sensor
+<https://en.wikipedia.org/wiki/Air%E2%80%93fuel_ratio_meter#Zirconia_oxygen_sensor>
 
 
     -- 【ECU仕様の知識】
-    -- https://www.minimania.com/A_Basic_Guide_to_Electronic_Fuel_Injection_for_Minis より
+    -- <https://www.minimania.com/A_Basic_Guide_to_Electronic_Fuel_Injection_for_Minis> より
     -- For a typical Mini EFI conversion, the EFI ECU should receive information from the following sensors:
     -- * A throttle position sensor that tells the computer how hard your foot is on the accelerator pedal.
     -- * A crank angle sensor that basically tells the computer where the pistons are in their travels.
@@ -140,19 +159,21 @@ https://en.wikipedia.org/wiki/Air%E2%80%93fuel_ratio_meter#Zirconia_oxygen_senso
      -- https://blogs.yahoo.co.jp/dmxbd452/5751726.html
     -- http://www.minispares.com/product/Classic/MNE101070.aspx
     -- Part number	Manual / Automatic	Attributes	              VIN No. From - VIN No. To 
-    -- MNE10026	 Automatic	SPI -         Except Cooper	 	          - 59844
-    -- MNE10027	 Manual    	SPI - Japan - Except Cooper	          	- 60487
-    -- MNE10097	 Manual	    SPI -         Except Cooper - 1992-93	 	- 59586
+    -- MNE10026	 Automatic	SPI -         Except Cooper	 	              - 59844
+    -- MNE10027	 Manual    	SPI - Japan - Except Cooper	                  - 60487
+    -- MNE10097	 Manual	    SPI -         Except Cooper - 1992-93	 	  - 59586
     -- MNE10090	 Automatic	SPI -         Except Cooper	            59845	68084
     -- MNE101060 Automatic	SPI -         Except Cooper	            68085	103112
-    -- MNE10092	 Manual	    SPI -         Cooper	                  60488	69492
-    -- MNE10089	 Manual	    SPI - Except Cooper	                    59587	67377
-    -- MNE101040 Manual	    SPI - Except Cooper	67378	103112
-    -- MNE101150 Manual	    SPI - Except Cooper	103113	134454
-    -- MNE101160 Automatic	SPI - Except Cooper	103113	134454
+    -- MNE10092	 Manual	    SPI -         Cooper	                60488	69492
+    -- MNE10089	 Manual	    SPI -         Except Cooper	            59587	67377
+    -- MNE101040 Manual	    SPI -         Except Cooper	            67378	103112
+    -- MNE101150 Manual	    SPI -         Except Cooper	           103113	134454
+    -- MNE101160 Automatic	SPI -         Except Cooper     	   103113	134454
+
     -- MNE101350 Manual	    SPI - Except UK - 1996 on	134455 - 	 
     -- MNE101351 Manual	    SPI - Except UK - 1996 on	134455 - 
     -- MNE101360 Automatic	SPI - Except UK - 1996 on	134455 - 	 
+    
     -- MNE101361 Automatic	SPI - Air Con - Except UK - 1996 on	134455 - 	 
     
     -- ^ original number for size of Frame 7d = 32
