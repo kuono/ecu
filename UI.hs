@@ -10,243 +10,52 @@ Portability : macOS X
 
 module UI where
 
+import Lib
+import qualified ECU
+import Control.Monad
+import Control.Monad.STM
+import Control.Monad.Trans.Writer
+import Control.Monad.Trans.Reader 
+import Control.Monad.Trans.Class
+import Control.Concurrent
+import Control.Concurrent.STM.TChan
+import qualified Control.Exception as Ex
+import qualified Data.ByteString   as BS
+import Text.Printf
+
 import Brick
+import Brick.BChan (newBChan, writeBChan)
+import qualified Brick.Widgets.Border as B
+import qualified Brick.Widgets.Border.Style as BS
+import qualified Brick.Widgets.Center as C
+import qualified Graphics.Vty as V
+import Data.Sequence (Seq)
+import qualified Data.Sequence as S
+import Linear.V2 (V2(..))
+import Lens.Micro ((^.))   
 
--- import System.IO -- for stdin, Buffering Mode
--- import qualified Control.Exception as Ex
--- import Control.Monad
--- import Control.Monad.STM
--- import Control.Monad.Trans.Writer
--- import Control.Monad.Trans.Reader 
--- import Control.Monad.Trans.Class
--- import Control.Concurrent
--- import Control.Concurrent.STM.TChan
--- import qualified Data.ByteString   as BS
--- import Data.Typeable
--- import Data.Time.LocalTime
--- import Data.Time.Clock
--- import Data.Char
--- import Data.Word
--- import Data.List.Split
--- import Data.Bits
--- -- import Data.Bits.Extras
--- import Data.Fixed
--- import Text.Printf
--- import Numeric
--- import qualified System.Posix.Unistd as U
+type GraphData = [[Dots]]
+type Dots = (Char,Char)
+data GraphRange = OverUL | Over75 | InBetween7550 | InBetween5025 | Under25 | UnderLL deriving (Eq,Ord)
 
--- ---------------------------
--- -- type definition       --
--- ---------------------------
--- maxGraphLength = 40
--- maxBinData     = 40
+maxGraphLength = 40
 
--- type Res           = (BS.ByteString,LocalTime) 
--- type SetCmd        = Word8
--- type SData         = BS.ByteString
--- type SDataSet      = (SetCmd, SData)
+-- 
+-- UI Name space
+-- 
+data Display = Dialog | DataPanel | CurrentStatus | CurrentData | GraphLog | BarLog | TextLog
 
--- -- -- | display module
--- displayer :: Chan Model -> IO ()
--- displayer modelCh =
---   do
---     Prelude.putStr $ vt100cr 2    -- clear all screen   -- Prelude.putStrLn $ "displayer Started."
---     initModel <- getInitModel
---     firstData <- getFirstData
---     tableView initModel firstData
---   `Ex.catch` (\e -> case (e::UserCommand) of
---     Quit      -> do { Prelude.putStr $ vt100mv 41 0 ; return () }
---     Reconnect -> displayer modelCh
---     _         -> Ex.throwIO e )
---   where
---   -- | actual display function
---   --   previous data remain displayed while not recieving any new numeric data
---   --   e.g. error or initialization command issued.
---   tableView :: Model      -- ^ new data 
---             -> [ECUData]  -- ^ old recorded data
---             -> IO()       
---   tableView model dats =
---     do
---       tuiDisplay
---       -- case status $ dat model of 
---       --   GotData _ -> tuiDisplay
---       --   _         -> ()
---       newModel <- readChan modelCh
---       let newDats = take 60 $ dat newModel:dats
---       tableView newModel newDats
---     where
---       tuiDisplay :: IO ()
---       tuiDisplay =
---         do
---           Prelude.putStr   $ vt100mv 0 0
---           Prelude.putStrLn $ "-----------------------------------------------" ++ vt100cr 0
---           Prelude.putStrLn $ " MyEcu: Copyright (C)2018-2019 by Kentaro UONO " ++ vt100cr 0
---           Prelude.putStrLn $ "-------------- time ---------------------------" ++ vt100cr 0
---           Prelude.putStrLn $ printf  " %6s " numl ++ printf " %6s " numr ++ ": " ++ j ++ " " ++ statusString ++ vt100cr 0
---           Prelude.putStrLn $ "-------------- 80 data ------------------------" ++ " (" ++ show l8 ++ " bytes ) " ++ reset ++ vt100lc 0
---           drawDataLine engineSpeed "   Engine Speed (rpm) :  %5d"       0    3500
---           drawDataLine throttlePot "throttle Potent ( V ) :  %5.2f"     0.0     4.0 -- 0x09	Throttle pot voltage, 0.02V per LSB. WOT should probably be close to 0xFA or 5.0V.
---           drawDataLine coolantTemp "   Coolant Temp (dgC) :    %3d"  (-55)    150
---           drawDataLine ambientTemp "   ambient Temp (dgC) :    %3d"  (-55)    150
---           drawDataLine intakeATemp "intake Air Temp (dgC) :    %3d"  (-55)    150
---           drawDataLine mapSensor   "     map Sensor (kPa) :    %3d"     0     130
---           drawDataLine battVoltage "battery Voltage ( V ) :  %5.2f"    12.3    15.0
---           Prelude.putStrLn $ printf "    idle switch       :%5s" (closedorclear (idleSwitch  d87 ))
---           Prelude.putStrLn $ printf " park or neutral? A/C?:%5s" (parkorneutral (pnClosed    d87 ))   ++ ' ':aconoff (pnClosed d87) ++ reset ++ vt100lc 0
---           drawDataLine idleACMP    "idl Air Ctl M P(C/O)  :    %3d"     0     180
---           drawDataLine idleSpdDev  "idl Spd deviatn       :  %5d"       0    1000 
---           drawDataLine ignitionAd  "ignition advnce (deg) : %6.2f"   (-24.0) 207.0 
---           drawDataLine coilTime    "      coil Time (msc) :  %5.2f"     0.0  132.0 
---           Prelude.putStrLn $         " 0B 0F 10 11 15 19 1A 1B" ++ reset ++ vt100lc 0
---           Prelude.putStrLn $ printf " %2x %2x %2x %2x %2x %2x %2x %2x" (unknown0B d87) (unknown0F d87) (unknown10 d87) (unknown11 d87) (unknown15 d87) (unknown19 d87) (unknown1A d87) (unknown1B d87) ++ reset ++ vt100lc 0
---           Prelude.putStrLn $ "-------------- 7D data ------------------------" ++ " (" ++ show l7 ++ " bytes ) " ++ reset ++ vt100lc 0
---           Prelude.putStrLn $ printf  " lambda voltage ( mV) :    %3d  "  ( lambda_voltage d87 ) ++ richorlean ( lambda_voltage d87 )
---           Prelude.putStrLn $ printf  "      closed loop     :    %3d  "  ( closed_loop'   d87 ) ++ openorclosed ( closed_loop' d87 )
---           drawDataLine fuel_trim'    "      fuel trim ( %% ) :    %3d "  0 500
---           Prelude.putStrLn $ "- Fault Code ----------------------------------" ++ reset ++ vt100lc 0
---           Prelude.putStrLn $ " (01) Coolant temp Sensor      | " ++ e01 ++ " (02) Air temp sensor          | " ++ e02 ++ reset ++ vt100lc 0
---           Prelude.putStrLn $ " (10) Fuel pump circuit        | " ++ e10 ++ " (16) Throttle position sensor | " ++ e16 ++ reset ++ vt100lc 0
---           Prelude.putStrLn $ "  Press '0' to clear fault codes " ++ reset ++ vt100lc 0
---           Prelude.putStrLn $ vt100mv 30 0  ++ "----------------- Log -------------------------"
---           mapM_ (Prelude.putStrLn . take 40 ) (if length logs >= 4 then take 4 logs else logs)
---           Prelude.putStrLn $ vt100mv 36 0  ++ "-----------------------------------------------" ++ vt100mv 3 0
---           return ()
---       d   = dat  model
---       (d8,d7,l8,l7,d87)  = case status d of 
---           GotData d' ->
---             let d8' = BS.take (fromIntegral (BS.head d')) d'
---                 d8l = fromIntegral (BS.head d8') ::Int
---                 d7' = BS.drop d8l d'
---                 d7l = fromIntegral (BS.head (BS.drop d8l d')) ::Int
---                 d87 = parse d'
---             in (d8',d7',d8l,d7l,d87)
---           _          -> (emptyD80,emptyD7d,28,32,parse emptyD87)
---       d87s = map analyse dats
---       analyse d' = case status d' of
---         GotData d'' -> parse d''
---         _           -> parse emptyD87 
---       drawDataLine :: (PrintfArg a , Real a) => (Frame -> a) -> String -> a -> a -> IO ()
---       drawDataLine f str min max = Prelude.putStrLn $ printf str ( f d87 ) ++ " " ++ graph min max f
---       statusString =  case status $ dat model of
---           Connected    model    -> bgreen ++ yellow ++ " Connected           " ++ reset ++ show model ++ vt100lc 0
---           CommandIssued msg     -> bgreen ++ yellow ++ " Cmd Issued          " ++ reset ++ show msg ++ vt100lc 0
---           NotConnected message  -> bred   ++ yellow ++ " Not Connected     : " ++ take 20 message ++ reset ++ vt100lc 0
---           DataError message     -> bred   ++ yellow ++ " DataError         : " ++ take 20 message ++ reset ++ vt100lc 0
---           GotData _             -> bgreen ++ yellow ++ printf " Connected (%3d,%3d)" l8 l7 ++ reset ++ vt100lc 0   
---       nums = printf "%6s" ( show $ num model )
---       logs = ECULib.log model
---       numr = if odd  $ num model then bwhite ++ black ++ nums ++ reset else nums
---       numl = if even $ num model then bwhite ++ black ++ nums ++ reset else nums
---       j    = take 26 $ (show . at $ dat model) ++ "000"
---       e01 = errorornoerror $ faultCode1  d87 -- (01) Coolant temp Sensor 
---       e02 = errorornoerror $ faultCode2  d87 -- (02) Air temp sensor 
---       e10 = errorornoerror $ faultCode10 d87 -- (10) Fuel pump cirkit 
---       e16 = errorornoerror $ faultCode16 d87 -- (16) Throttle position sensor 
---       errorornoerror :: Bool -> String
---       errorornoerror b = if b then bred ++ yellow ++ " E R R O R " ++ reset else bgreen ++ yellow ++ " No ERROR  " ++ reset
-
---       graph :: (Real a) => a -> a -> (Frame -> a) -> String
---       graph min max f =  " " ++ bar  min max f d : " " ++ map ( bar  min max f ) dats ++ reset ++ vt100lc 0
-
---       bar::(Real a )=> a -> a -> (Frame -> a) -> ECUData -> Char
---       bar min max f !x =　case status x of
---           Connected     _ -> '+'
---           CommandIssued _ -> 'O'
---           NotConnected  _ -> 'X'
---           DataError     _ -> 'E'
---           GotData       d'
---             | x' <= min  -> 'L'
---             | x' >= max  -> 'U'
---             | otherwise -> gs !! truncate (  toRational ( length gs -1 )  *   ( toRational x' - toRational min ) / toRational (max-min))
---             where
---               gs = " ▁▂▃▄▅▆▇█"
---               x' = f $ parse d'
-
---   tf c = if c then green ++ "True " ++ reset else red ++ "False" ++ reset
---   closedorclear::Bool -> String
---   closedorclear b = if b then " Closed" else " Other "
---   parkorneutral::Int -> String -- 0 is closed
---   parkorneutral b = if b == 0 then " Closed" else " Open  "
---   aconoff::Int -> String
---   aconoff       d = if d == 0 then bblue ++ yellow ++ " a/c on   " ++ reset else bgreen ++ yellow ++ " a/c off  " ++ reset
---   richorlean::Int -> String
---   richorlean v   = if v >= 450 then bred ++ green  ++ " rich     " ++ reset else bgreen ++ yellow ++ " lean     " ++ reset
---   openorclosed::Int -> String
---   openorclosed d = if d == 0   then bred ++ green  ++ "Crl wt FDt" ++ reset else bgreen ++ yellow ++ "Crl wt O2d" ++ reset
-
--- frameTitle  = "E Speed,coolant T,ambient T,intakeAir T,fuel T,map Sensor,btVolt,throtle Pot,idle Swch,0B,p/n switch, CTS E,IATS E, FPC E, TPC E,0F,10,11,iACMP,iSDev,15,ignAd,coil T,19,1A,1B,lmdvt,clsdl,fuelt"
--- frameFmt    = "%5d,%3d,%3d,%3d,%3d,%3d,%6.2f,%6.2f,%c,%02X,%3d,%c,%c,%c,%c,%02X,%02X,%02X,%3d,%6d,%02X,%5.1f,%5.1f,%02X,%02X,%02X,%5d,%3d,%5d"
--- -- | Escape sequence in VT100
--- reset    = "\ESC[0m"
--- brev     = "\ESC[7m"  --  set reverse
--- -- | Escape sequence in VT100 / set text foreground colour
--- black    = "\ESC[30m" 
--- red      = "\ESC[31m" 
--- green    = "\ESC[32m" 
--- yellow   = "\ESC[33m"
--- blue     = "\ESC[34m"
--- magenta  = "\ESC[35m"
--- cyan     = "\ESC[36m"
--- white    = "\ESC[37m"
--- -- | Escape sequence in VT100 / set text background Colours
--- bblack   = "\ESC[40m"--	Black
--- bred     = "\ESC[41m"--	Red
--- bgreen   = "\ESC[42m"--	Green
--- byellow  = "\ESC[43m"--	Yellow
--- bblue    = "\ESC[44m"--	Blue
--- bmagenta = "\ESC[45m"--	Magenta
--- bcyan    = "\ESC[46m"--	Cyan
--- bwhite   = "\ESC[47m"--	White
-
--- frametoTable :: Frame -> String
--- frametoTable f = {-# SCC "frametoTable" #-}
---   printf frameFmt
---     (engineSpeed f ) -- ::Int
---     (coolantTemp f ) -- ::Int
---     (ambientTemp f ) -- ::Int
---     (intakeATemp f ) -- ::Int
---     (fuelTemp    f ) -- ::Int
---     (mapSensor   f ) -- ::Int
---     (battVoltage f ) -- ::Float
---     (throttlePot f ) -- ::Float
---     (tf (idleSwitch  f )) -- ::Bool ,-- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
---     (unknown0B       f )  -- ::Word8,-- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
---     (pnClosed    f ) -- 0x0C ::Park/neutral switch. Zero is closed, nonzero is open.
---     (tf (faultCode1  f )) -- 0x0D * Bit 0: Coolant temp sensor fault (Code 1)
---     (tf (faultCode2  f )) --      * Bit 1: Inlet air temp sensor fault (Code 2)
---     (tf (faultCode10 f )) -- 0x0E * Bit 1: Fuel pump circuit fault (Code 10)
---     (tf (faultCode16 f )) --      * Bit 7: Throttle pot circuit fault (Code 16)
---     (unknown0F   f ) -- :: Word8, 0x0F
---     (unknown10   f ) -- :: Word8, 0x10
---     (unknown11   f ) -- :: Word8, 0x11
---     (idleACMP    f ) -- :: Int  ,-- 0x12	Idle air control motor position. On the Mini SPi's A-series engine, 0 is closed, and 180 is wide open.
---     (idleSpdDev  f ) -- :: Int  ,-- 0x13-14	Idle speed deviation (16 bits)
---     (unknown15   f ) -- :: Word8, 0x15
---     (ignitionAd  f ) -- :: Float,-- 0x16	Ignition advance, 0.5 degrees per LSB with range of -24 deg (0x00) to 103.5 deg (0xFF)
---     (coilTime    f ) -- :: Float,-- 0x17-18	Coil time, 0.002 milliseconds per LSB (16 bits)
---     (unknown19   f ) -- :: Word8, 0x19
---     (unknown1A   f ) -- :: Word8, 0x1A
---     (unknown1B   f ) -- :: Word8, 0x1B
---     (lambda_voltage f) -- :: Int
---     (closed_loop'   f) -- :: Int
---     (fuel_trim'     f) -- :: Int 
---   where tf c = if c then 'T' else 'F'
-
--- -- ---------------------------
--- -- | VT100 カーソル移動 エスケープシーケンス　行　桁
--- vt100mv :: Int -> Int -> String 
--- vt100mv l c = "\ESC[" ++ show l ++ ";" ++ show c ++ "H"
--- -- | VT100 画面消去エスケープシーケンス ; m = 0 ... カーソルから, 1 ... カーソルまで, 2 ... 画面全体
--- vt100cr :: Int -> String
--- vt100cr m = "\ESC[" ++ show m ++ "J"
--- -- | VT100 行消去エスケープシーケンス ; 00（or省略）...カーソルより後ろ, 1...カーソルより前, 2...行全体
--- vt100lc :: Int -> String
--- vt100lc m = "\ESC["++ show m ++ "K"
--- dispHex :: String -> BS.ByteString -> IO ()
--- dispHex t d = do
---   Prelude.putStr t
---   mapM_ (printf " %02X") $ BS.unpack d
-
--- dispHexLn :: String -> BS.ByteString -> IO ()
--- dispHexLn t d = dispHex t d >> Prelude.putStrLn ""
-
+drawInitialScreen :: String -- ^ current version
+                  -> String -- ^ compiled date
+                  -> Widget Name
+drawInitialScreen currentVersion compiledOn =  
+      str   "    \\              '             `"
+  <=> str   "     .              .             `     ,_ .`"
+  <=> str   "--_,   ,            |              /  /`. +'.'"
+  <=> str   "+ + \". .===========================w. || = =  "
+  <=> str   "= = :|V-Monitor for Rover Mini MEMS-\\\\ \\.+_+.'"
+  <=> str   "- -,\"|:--------- ------------ -------:|     |"
+  <=> str ( ( take 37 ( " .   \\\\-Version " ++ currentVersion ++ " on " ++ compiledOn )) ++ "-//   .  ." )
+  <=> str   "`.`  .^.== +--------------------+ == .`.'.` ,"
+  <=> str   "-----| |-- |  by Kentaro UONO   |----| |-''' "
+  <=> str   "````  '    +--------------------+     '"

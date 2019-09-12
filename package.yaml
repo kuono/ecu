@@ -1,5 +1,5 @@
 name:                ecu
-version:             0.5.0
+version:             0.8.0
 github:              "githubuser/ecu"
 license:             BSD3
 author:              "Kentaro UONO"
@@ -25,6 +25,7 @@ dependencies:
 - time
 - stm
 - bytestring
+- disk-free-space
 - time
 - split
 - directory
@@ -36,16 +37,19 @@ dependencies:
 - microlens
 - linear
 - vector
+- random
 
 library:
-  source-dirs: src
+  source-dirs:       src
 
-default-extensions:  Strict StrictData
+# default-extensions:  # {- Strict StrictData -}
 
 executables:
   ecu-exe:
     main:                Main.hs
-    source-dirs:         app
+    source-dirs:
+    - app
+    - src
     ghc-options:
     - -threaded
     - -rtsopts
