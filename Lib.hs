@@ -10,10 +10,16 @@ Portability : macOS X
 
 module Lib where 
 
-import Control.Concurrent.STM.TBQueue
+import Control.Concurrent
+import Control.Concurrent.STM.TChan
+import qualified Control.Exception as Ex
+import Control.Monad
+import Control.Monad.STM
+import Control.Monad.IO.Class
 import qualified Brick.BChan as BC
 
 import qualified ECU
+import System.IO -- for stdin, Buffering Mode
 import System.Directory
 import System.Environment
 import qualified Data.ByteString   as BS
@@ -23,7 +29,9 @@ import Data.Time.Clock
 import qualified Graphics.Vty as V
 import Text.Printf
 import Data.Fixed
-
+--
+ver   = "0.8.4"
+date  = "2019.09.21"
 --
 -- types
 --
@@ -32,34 +40,54 @@ data DataSet = DataSet { -- time :: LocalTime, stat :: ECU.Status, edat :: ECU.F
     evnt :: !ECU.Event
   , gdat :: !ChartData
   , note :: !String }
-data Status = Status {
-    rdat  :: DataSet   -- ^ rdat  : 直近のデータセット
-  , dset  :: [DataSet] -- ^ dset  : 直前までのデータセット（最大 maxData個）
-  , cset  :: (BC.BChan Event,TBQueue ECU.UCommand)
-  , menu  :: MenuTree
-}
+data Status = Status
+  { testmode :: !Bool     -- ^ testmode : memsを接続しないで試す
+  , model    :: !ECU.ModelDataSet
+  , rdat     :: !DataSet  -- ^ rdat  : 直近のデータセット
+  , dset     :: [DataSet] -- ^ dset  : 直前までのデータセット（最大 maxData個）
+  , echan    :: BC.BChan Event
+  , cchan    :: TChan ECU.UCommand
+  , lchan    :: TChan Event
+  , inmenu   :: !Bool
+  , menu     :: !Menu
+  }
 -- GUI (Brick specific)
-data Name  = StatusPane | DataPane | GraphPane | FaultCodePane deriving (Eq,Ord,Show) -- MenuPane | StatusPane | CommandSelectPane deriving (Eq,Ord)
+data Name  = StatusPane | DataPane | GraphPane | NotePane | ErrorContentsPane deriving (Eq,Ord,Show) -- MenuPane | StatusPane | CommandSelectPane deriving (Eq,Ord)
 type Event = ECU.Event 
 -- Menu
-type MenuTree = [Menu]
-type Menu  = [MenuItem]
-data MenuItem = MenuItem
-  { mstring :: !String
-  , checked :: !Bool
-  , scutchr :: !Char
-  }
-basicMenu = 
-    [ [ MenuItem {mstring = "F:File",checked = False, scutchr = 'F'}
-      , MenuItem {mstring = " Q:Quit",checked = False, scutchr = 'Q'}
-      ]
-    , [ MenuItem {mstring = "E:Edit",checked = False, scutchr = 'E'}
-      , MenuItem {mstring = " O:Option",checked = False, scutchr = 'O'}
-      ]
-    , [ MenuItem {mstring = "Command", checked = False, scutchr = 'G'}
-      , MenuItem {mstring = " 0:ClearFault", checked = False, scutchr = '0'}
-      ]
-    ]
+type Menu = String
+-- type Menu  = [MenuItem]
+testMenu = "ESC :Quit  | 1 :Initialize   | 2 :OffLine | d : Get dummy Data"
+helpMenu = "ESC :Quit  | 0 :Clear Faults | 1 :Initialize | ← :Dec IAC Pos | → :Inc IAC POS | p :Get IAC Pos | ↑ :Inc IgAd | ↓ :Dec IgAd "
+-- data MenuItem = MenuItem
+--   { mstring    :: !String
+--   , selectable :: !Bool
+--   , selected   :: !Bool
+--   , scutchr    :: [Char]
+--   }
+-- testMenu = 
+--     [ MenuItem {mstring = "ESC:Continue" , selectable = True,selected = False, scutchr = [] }
+--     , MenuItem {mstring = "1  :Initialize", selectable = True, selected = False, scutchr = ['1']}
+--     , MenuItem {mstring = "2  :Off line", selectable = True, selected = False , scutchr = ['2']}
+--     , MenuItem {mstring = "d  :Get dummy Data", selectable = True, selected = False, scutchr = ['d']}
+--     ]
+-- helpMenu = 
+--     [ MenuItem {mstring = "ESC:Continue" , selectable = True,selected = False, scutchr = [] }
+--     , MenuItem {mstring = "0  :Clear Faults", selectable = True, selected = False, scutchr = ['0']}
+--     , MenuItem {mstring = "1  :Initialize", selectable = True, selected = False, scutchr = ['1']}
+--     ]
+-- basicMenu = 
+--     [ MenuItem {mstring = " C:Connect   ", selectable = True,  selected = True,  scutchr = ['s','S','o','O']}
+--       -- ^ draw setup dialog with cancel/connect button, with port name, autorecconect is selectable 
+--     , MenuItem {mstring = " R:Reconnect ", selectable = False, selected = False, scutchr = ['r','R','p','P']} 
+--       -- ^ select it when mems is disconnected with some error 
+--     , MenuItem {mstring = " 0:ClearFault", selectable = True,  selected = False, scutchr = ['0']}
+--     , MenuItem {mstring = " 1:IAC Pos   ", selectable = False, selected = False, scutchr = ['1']}
+--       -- ^ select it when you want to get / set IAC Pos
+--     , MenuItem {mstring = " 2:Fuel Pump ", selectable = False, selected = False, scutchr = ['2']}
+--       -- ^ select it when you want to stop / go fuel pump
+--     , MenuItem {mstring = " Q:Quit      ", selectable = False, selected = False, scutchr = ['q','Q','\'']}
+--     ]
 -- Graph
 type ChartData = [(GraphItem,Int)]
 data GraphItem = GraphItem {
@@ -71,7 +99,6 @@ data GraphItem = GraphItem {
   , ul    :: !Int            -- ^ upper limit for checking conditions
   , ll    :: !Int            -- ^ lower limit for checking conditions
 }
-
 -- 
 -- global constants　グローパル定数
 -- 
@@ -100,8 +127,8 @@ defaultUSBPathRaspberryPi = "/dev/ttyUSB0" :: FilePath
 oldUSBPath                = "/dev/tty.usbserial-DJ00L8EZ" -- :: FilePath
 alterntUSBPath            = "/dev/tty.usbserial-FT90HWC8" -- :: FilePath
 
-initialState :: (BC.BChan Event,TBQueue ECU.UCommand) -> IO Status
-initialState c = do
+initialState :: (BC.BChan Event,TChan ECU.UCommand,TChan Event) -> IO Status
+initialState (ech,cch,dch) = do
   t <- currentTime
   a <- System.Environment.getArgs
   e <- System.Environment.getEnv "HOME"
@@ -111,25 +138,25 @@ initialState c = do
             [opt] -> opt   
             _     -> error "error: exactly one arguments needed."
   exist <- doesFileExist p
-  return $  if not exist then
-              Status { 
-                rdat = DataSet {
-                    evnt = (t,ECU.PortNotFound p)
-                  , gdat = []
-                  , note = "Checked Path" }
-              , dset = []
-              , cset = c
-              , menu = basicMenu }
-            else 
-              Status {
-                rdat = DataSet {
-                    evnt = (t,ECU.OffLined)
-                  , gdat = []
-                  , note = "Port Found" }
-              , dset = []
-              , cset = c
-              , menu = basicMenu
-              }
+  return $ Status { 
+      testmode = not exist
+    , model    = snd ECU.mneUnknown
+    , rdat     = DataSet {
+          evnt = (t, if exist then ECU.OffLined else ECU.PortNotFound p)
+        , gdat = []
+        , note = "Initial State : " ++ if exist
+            then "Port Found." 
+            else "Port Not Found." }
+    , dset = replicate maxData DataSet { 
+          evnt = (t,ECU.PortNotFound p)
+        , gdat = []
+        , note = ""
+        }
+    , echan = ech
+    , cchan = cch
+    , lchan = dch
+    , inmenu = True
+    , menu   = if exist then helpMenu else testMenu }
 --
 frametoTable :: ECU.Frame -> String
 frametoTable f = {-# SCC "frametoTable" #-}
@@ -164,7 +191,37 @@ frametoTable f = {-# SCC "frametoTable" #-}
       (ECU.closed_loop'   f) -- :: Int
       (ECU.fuel_trim'     f) -- :: Int 
     where tf c = if c then 'T' else 'F'
-  
+--
+-- log
+--
+runlog :: TChan Event -> IO ()
+runlog ech = forever $ do
+  l <- logFileName :: IO FilePath
+  withFile l WriteMode $
+    \h -> do
+      hPutStrLn h  $ "Date,Time," ++ frameTitle
+      loop h
+    where loop :: Handle -> IO ()
+          loop h = 
+            do
+              -- r <- System.DiskSpace.getAvailSpace l
+              (t,e) <- atomically $ readTChan ech
+              let j  = localTimetoString t
+              hPutStr h $ j ++ ","
+              hPutStrLn h $ case e of 
+                ECU.Tick r         -> frametoTable $ ECU.parse r
+                ECU.PortNotFound f -> "Port Not Found : " ++ f
+                ECU.Connected m    -> "Connected : " ++ ECU.mname m
+                ECU.OffLined       -> "Off Lined. "
+                ECU.Done           -> "Some Command issued."
+                ECU.Error s        -> "Error : " ++ s
+              hFlush h
+              when (e /= ECU.OffLined) $ loop h
+            `Ex.catch`
+              \e -> do
+                putStrLn $ "Exception " ++ show (e::Ex.SomeException) ++ "issued."
+                hClose h  
+--
 logFileName :: IO FilePath
 logFileName = do
     time <- currentTime :: IO LocalTime
@@ -184,8 +241,9 @@ getDummyStatus s = do
   t <- currentTime
   r <- ECU.dummyData807d
   let f = ECU.parse r
-  return Status {
-      rdat = DataSet {
+  return s
+    { testmode = True
+    , rdat = DataSet {
         evnt = (t,ECU.Tick r),
         gdat = [
           (engspeed,    ECU.engineSpeed  f),
@@ -194,11 +252,9 @@ getDummyStatus s = do
           (battvoltage, ECU.ibattVoltage f),
           (coolanttemp, ECU.coolantTemp  f)
         ],
-        note = "dummy"
+        note = "Dummy Data issued."
       }
     , dset = rdat s : dset s
-    , cset = cset s
-    , menu = basicMenu
     }
 
 currentTime :: IO LocalTime
