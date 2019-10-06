@@ -16,8 +16,7 @@ module ECU  ( Event(..), RData(..),Frame(..), EvContents(..), UCommand (..), Mod
 ) where
 
 import qualified Brick.BChan as BC
---import Control.Monad.Trans.Writer
-import qualified Data.ByteString   as BS
+import qualified Data.ByteString.Char8 as BS
 import qualified Control.Exception as Ex
 import Control.Concurrent
 import Control.Concurrent.STM.TChan
@@ -150,8 +149,9 @@ res DecIACPos    = decIACPos
 res IncIgAd      = incIgAd
 res DecIgAd      = decIgAd
 res _            = get807d -- 未実装のコマンドは無視する
---
-init ::(FilePath,BC.BChan Event,TChan UCommand,TChan Event) -> IO (Maybe Env)
+-- | ecu 初期化関数　
+init ::(FilePath,BC.BChan Event,TChan UCommand,TChan Event) -- ^ デバイスパス，UIイベント・送信・受信各チャネル
+     -> IO (Maybe Env)
 init (f,dc,cc,lc)= do
     -- putStrLn "Initializing started."
     threadDelay 1000000 {- 1sec delay -}
@@ -163,21 +163,20 @@ init (f,dc,cc,lc)= do
             -- atomically $ writeTChan lc (j,PortNotFound f) 未接続時にログが巨大化するためコメントアウト
             return Nothing
         else do
-            sp <- openSerial f defaultSerialSettings { commSpeed = CS9600, timeout= 1, flowControl = Software }
-            r1 <- send sp $ BS.singleton 0xca  -- 202 'ha no hankaku' 
-            r1' <- tryRecv1Byte sp 5
+            sp   <- openSerial f defaultSerialSettings { commSpeed = CS9600, timeout= 1, flowControl = Software }
+            r1   <- send sp $ BS.singleton (chr 0xca)  -- 202 'ha no hankaku' 
+            r1'  <- tryRecv1Byte sp 5
             -- putStrLn $ "r1 = " ++ show r1 ++ ":" ++ show r1'
-            r2 <- send sp $ BS.singleton 0x75  -- 117 'u' 
-            r2' <- tryRecv1Byte sp 5
+            r2   <- send sp $ BS.singleton (chr 0x75)  -- 117 'u' 
+            r2'  <- tryRecv1Byte sp 5
             -- putStrLn $ "r2 = " ++ show r2 ++ show r2'
-            r3 <- send sp $ BS.singleton $ fst htbt  -- 244 f4 -> f4 00
-            r3' <- tryRecv1Byte sp 5
+            r3   <- send sp $ BS.singleton $ fst htbt  -- 244 f4 -> f4 00
+            r3'  <- tryRecv1Byte sp 5
             r3'' <- tryRecv1Byte sp 5
-            -- putStrLn $ "r3 = " ++ show r3 ++ show r3' ++ show r3''
-            r4 <- send sp $ BS.singleton 0xd0  -- 208 'mi no hankaku'
-            r4' <- tryRecv1Byte sp 5
-            -- putStrLn $ "r4 = " ++ show r4 ++ show r4'
-            m <- tryRecvNBytes sp BS.empty 4 -- ^ recv p 4 だと取りこぼす（（0.5秒間位の連続リレー音）
+            r4   <- send sp $ BS.singleton (chr 0xd0)  -- 208 'mi no hankaku'
+            r4'  <- tryRecv1Byte sp 5
+            m <- tryRecvNBytes sp BS.empty 4
+            -- recv p 4 だと取りこぼす（（0.5秒間位の連続リレー音）
             -- putStrLn $ "4bytes = " ++ show m
             if m == BS.empty || BS.length m /= 4
                 then return Nothing
@@ -190,7 +189,7 @@ init (f,dc,cc,lc)= do
                               Nothing  -> do
                                   test <- runReaderT get807d $ Env { path = f, port = sp, model = snd mneUnknown, dch = dc , cch = cc , lch = lc , tickt = tt } 
                                   let (d8l,d7l) = case test of
-                                        Tick (d8,d7) -> (fromIntegral $ BS.index d8 0,fromIntegral $ BS.index d7 0)
+                                        Tick (d8,d7) -> (ord $ BS.index d8 0,ord $ BS.index d7 0)
                                         _            -> (28,14)
                                   return $ (snd mneUnknown) {name = "Unknown ( " ++ show d8l ++ "," ++ show d7l ++ ")" ,d8size = d8l,d7size = d7l}
                               Just md' -> return $ md' {name = name md' ++ "(" ++ show (d8size md') ++ "," ++ show (d7size md') ++ ")" } 
@@ -242,24 +241,24 @@ data Frame = Frame
   , throttlePot :: !Float -- 0x09	Throttle pot voltage, 0.02V per LSB. WOT should probably be close to 0xFA or 5.0V.
   , ithrottlePot:: !Int
   , idleSwitch  :: !Bool  -- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
-  , unknown0B   :: !Word8 -- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
+  , unknown0B   :: !Int -- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
   , pnClosed    :: !Int   -- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
                          -- Fault codes. On the Mini SPi, only two bits in this location are checked:             
   , faultCode1  :: !Bool  -- 0x0D  * Bit 0: Coolant temp sensor fault (Code 1)
   , faultCode2  :: !Bool  --       * Bit 1: Inlet air temp sensor fault (Code 2)
   , faultCode10 :: !Bool  -- 0x0E  * Bit 1: Fuel pump circuit fault (Code 10)
   , faultCode16 :: !Bool  --       * Bit 7: Throttle pot circuit fault (Code 16)
-  , unknown0F   :: !Word8 -- 0x0F	Unknown
-  , unknown10   :: !Word8 -- 0x10	Unknown
-  , unknown11   :: !Word8 -- 0x11	Unknown
+  , unknown0F   :: !Int -- 0x0F	Unknown
+  , unknown10   :: !Int -- 0x10	Unknown
+  , unknown11   :: !Int -- 0x11	Unknown
   , idleACMP    :: !Int   -- 0x12	Idle air control motor position. On the Mini SPi's A-series engine, 0 is closed, and 180 is wide open.
   , idleSpdDev  :: !Int   -- 0x13-14	Idle speed deviation (16 bits)
-  , unknown15   :: !Word8 -- 0x15	Unknown
+  , unknown15   :: !Int -- 0x15	Unknown
   , ignitionAd  :: !Float   -- 0x16	Ignition advance, 0.5 degrees per LSB with range of -24 deg (0x00) to 103.5 deg (0xFF)
   , coilTime    :: !Float   -- 0x17-18	Coil time, 0.002 milliseconds per LSB (16 bits)
-  , unknown19   :: !Word8  -- 0x19	Unknown
-  , unknown1A   :: !Word8  -- 0x1A	Unknown
-  , unknown1B   :: !Word8  -- 0x1B	Unknown
+  , unknown19   :: !Int  -- 0x19	Unknown
+  , unknown1A   :: !Int  -- 0x1A	Unknown
+  , unknown1B   :: !Int  -- 0x1B	Unknown
   , d7dsize     :: !Int
   , lambda_voltage:: !Int  -- This lambda value is a calculated value (if it is the same as the British emissions test).     And a value of, say, 1.05, suggests it is 5% too lean.   But, if your oxygen (and CO and HC) readings are all good, then it suggests your high lambda reading is because of a leak in the exhaust wgich pulls in fresh air (and oxygen).     You could try starting your car when it is cold and put your hand over the exhaust pipe and look underneath to see if water is leaking from any if the joints. 
   , closed_loop'  :: !Int  -- 0 : Open Loop, others : Closed Loop  
@@ -269,40 +268,40 @@ data Frame = Frame
 -- internal library
 --
 -- | ECU Commands
-type Command  = (Word8,String) -- ^ ECU returns echo and one result byte. Command byte (send to ECU), Num of Response following bytes from ECU
-type Command' = (Word8,String) -- ^ ECU returns only echo byte.
-opnfp = (0x01,"Open Fuel Pump relay =stop"):: Command -- Open fuel pump relay (stop fuel pump) 
-opnpr = (0x02,"Open PTC Relay")            :: Command -- Open PTC relay (inlet manifold heater)
-opnac = (0x03,"Open A/C Relay")            :: Command -- Open air conditioning relay 
-clspv = (0x08,"Close purge valve?")        :: Command -- Close purge valve ?
-opnO2 = (0x09,"Open O2 heater relay?")     :: Command -- Open O2 heater relay ?
-clsfp = (0x11,"Close Fuel Pump relay =run"):: Command -- Close fuel pump relay (run fuel pump)
-clspr = (0x12,"Close PTC Relay")           :: Command -- Close PTC Relay (inlet manifold heater)
-clsac = (0x13,"Close A/C Relay")           :: Command -- Close air conditioning relay
-opnpv = (0x18,"Open purge valve?")         :: Command -- Open purge valve ?)
-clsO2 = (0x19,"Close O2 heater relay ?")   :: Command -- Close O2 heater relay ?
-clsf1 = (0x1d,"Close Fan 1 relay?")        :: Command' -- Close Fan 1 relay ? 
-clsf2 = (0x1e,"Close Fan 2 relay?")        :: Command' -- Close Fan 2 relay ?
-icrft = (0x79,"Increment Fuel Trim")       :: Command -- Increments fuel trim setting and returns the current value
-dcrft = (0x7a,"Decrement Fuel Trim")       :: Command -- Decrements fuel trim setting and returns the current value
-icrft'= (0x7b,"Increment Fuel Trim-2")     :: Command -- Increments fuel trim setting and returns the current value
-dcrft'= (0x7c,"Decrement Fuel Trim-2")     :: Command -- Decrements fuel trim setting and returns the current value 
-req7d = (0x7d,"Request data frame/7D")     :: Command -- get data for frame7d - followed by 32-byte data frame; 125
-req80 = (0x80,"Request data frame/80")     :: Command -- get data for frame80 - followed by 28-byte data frame; 128
-incid = (0x89,"Increments idle decay")     :: Command -- Increments idle decay setting and returns the current value
-decid = (0x8a,"Decrements idle decay")     :: Command -- Decrements idle decay setting and returns the current value
-incis = (0x91,"Increments idle speed")     :: Command -- Increments idle speed setting and returns the current value
-decil = (0x92,"Decrements idle speed")     :: Command -- Decrements idle speed setting and returns the current value
-incia = (0x93,"Increments ignition ad")    :: Command -- Increments ignition advance offset and returns the current value
-decia = (0x94,"Decrements ignition ad")    :: Command -- Decrements ignition advance offset and returns the current value
-clrft = (0xcc,"Clear fault code")          :: Command -- 204, Clear fault codes	CC 00
-htbt  = (0xf4,"NOP/heartbeat?")            :: Command -- 0xf4 244 NOP / heartbeat? Sent continuously by handheld diagnostic tools to verify serial link.
-actfi = (0xf7,"Actuate fuel incejtor")     :: Command -- F7 03 (SPI?)
-figcl = (0xf8,"Fire ignition coil")        :: Command -- F8 02 
-reqip = (0xfb,"Request IAC position")      :: Command -- FB xx where second byte represents the IAC position
-opiac = (0xfd,"Open IAC one and get pos")  :: Command -- FD xx, where the second byte represents the IAC position
-cliac = (0xfe,"Close IAC one and get pos") :: Command
-rqiac = (0xff,"Request current IAC pos?")  :: Command
+type Command  = (Char,String) -- ^ ECU returns echo and one result byte. Command byte (send to ECU), Num of Response following bytes from ECU
+type Command' = (Char,String) -- ^ ECU returns only echo byte.
+opnfp = (chr 0x01,"Open Fuel Pump relay =stop"):: Command -- Open fuel pump relay (stop fuel pump) 
+opnpr = (chr 0x02,"Open PTC Relay")            :: Command -- Open PTC relay (inlet manifold heater)
+opnac = (chr 0x03,"Open A/C Relay")            :: Command -- Open air conditioning relay 
+clspv = (chr 0x08,"Close purge valve?")        :: Command -- Close purge valve ?
+opnO2 = (chr 0x09,"Open O2 heater relay?")     :: Command -- Open O2 heater relay ?
+clsfp = (chr 0x11,"Close Fuel Pump relay =run"):: Command -- Close fuel pump relay (run fuel pump)
+clspr = (chr 0x12,"Close PTC Relay")           :: Command -- Close PTC Relay (inlet manifold heater)
+clsac = (chr 0x13,"Close A/C Relay")           :: Command -- Close air conditioning relay
+opnpv = (chr 0x18,"Open purge valve?")         :: Command -- Open purge valve ?)
+clsO2 = (chr 0x19,"Close O2 heater relay ?")   :: Command -- Close O2 heater relay ?
+clsf1 = (chr 0x1d,"Close Fan 1 relay?")        :: Command' -- Close Fan 1 relay ? 
+clsf2 = (chr 0x1e,"Close Fan 2 relay?")        :: Command' -- Close Fan 2 relay ?
+icrft = (chr 0x79,"Increment Fuel Trim")       :: Command -- Increments fuel trim setting and returns the current value
+dcrft = (chr 0x7a,"Decrement Fuel Trim")       :: Command -- Decrements fuel trim setting and returns the current value
+icrft'= (chr 0x7b,"Increment Fuel Trim-2")     :: Command -- Increments fuel trim setting and returns the current value
+dcrft'= (chr 0x7c,"Decrement Fuel Trim-2")     :: Command -- Decrements fuel trim setting and returns the current value 
+req7d = (chr 0x7d,"Request data frame/7D")     :: Command -- get data for frame7d - followed by 32-byte data frame; 125
+req80 = (chr 0x80,"Request data frame/80")     :: Command -- get data for frame80 - followed by 28-byte data frame; 128
+incid = (chr 0x89,"Increments idle decay")     :: Command -- Increments idle decay setting and returns the current value
+decid = (chr 0x8a,"Decrements idle decay")     :: Command -- Decrements idle decay setting and returns the current value
+incis = (chr 0x91,"Increments idle speed")     :: Command -- Increments idle speed setting and returns the current value
+decil = (chr 0x92,"Decrements idle speed")     :: Command -- Decrements idle speed setting and returns the current value
+incia = (chr 0x93,"Increments ignition ad")    :: Command -- Increments ignition advance offset and returns the current value
+decia = (chr 0x94,"Decrements ignition ad")    :: Command -- Decrements ignition advance offset and returns the current value
+clrft = (chr 0xcc,"Clear fault code")          :: Command -- 204, Clear fault codes	CC 00
+htbt  = (chr 0xf4,"NOP/heartbeat?")            :: Command -- 0xf4 244 NOP / heartbeat? Sent continuously by handheld diagnostic tools to verify serial link.
+actfi = (chr 0xf7,"Actuate fuel incejtor")     :: Command -- F7 03 (SPI?)
+figcl = (chr 0xf8,"Fire ignition coil")        :: Command -- F8 02 
+reqip = (chr 0xfb,"Request IAC position")      :: Command -- FB xx where second byte represents the IAC position
+opiac = (chr 0xfd,"Open IAC one and get pos")  :: Command -- FD xx, where the second byte represents the IAC position
+cliac = (chr 0xfe,"Close IAC one and get pos") :: Command
+rqiac = (chr 0xff,"Request current IAC pos?")  :: Command
 --
 -- Actuator Command
 -- 
@@ -312,16 +311,16 @@ rqiac = (0xff,"Request current IAC pos?")  :: Command
 --   AC relay, PTC relay, and fuel pump relay automatically after a short time 
 --   (i.e. without requiring the 'off' command). The 'off' command is acknowledged
 --   by the ECU, but apparently has no effect.
-fuelPumpOn     = (0x11,"Fuel Pump on")   :: Command -- 11 00
-fuelPumpOff    = (0x01,"Fuel Pump off")  :: Command -- 01 00
-ptcRelayOn     = (0x12,"ptc Relay on")   :: Command -- 12 00
-ptcRelayOff    = (0x02,"ptc Relay off")  :: Command -- 02 00
-acRelayOn      = (0x13,"a/c Relay on")   :: Command -- 13 00
-acRelayOff     = (0x03,"a/c Relay off")  :: Command -- 03 00
-testInjectors  = (0xf7,"test injectors") :: Command -- f7 03 (SPi ?)
-fireCoil       = (0xf8,"fire coil")      :: Command -- f8 02
-openIac        = (0xfd,"open IAC")       :: Command -- fd xx where the second byte represents the IAC position
-closeIac       = (0xfe,"close IAC")      :: Command -- fe xx where the second byte represents the IAC position
+fuelPumpOn     = (chr 0x11,"Fuel Pump on")   :: Command -- 11 00
+fuelPumpOff    = (chr 0x01,"Fuel Pump off")  :: Command -- 01 00
+ptcRelayOn     = (chr 0x12,"ptc Relay on")   :: Command -- 12 00
+ptcRelayOff    = (chr 0x02,"ptc Relay off")  :: Command -- 02 00
+acRelayOn      = (chr 0x13,"a/c Relay on")   :: Command -- 13 00
+acRelayOff     = (chr 0x03,"a/c Relay off")  :: Command -- 03 00
+testInjectors  = (chr 0xf7,"test injectors") :: Command -- f7 03 (SPi ?)
+fireCoil       = (chr 0xf8,"fire coil")      :: Command -- f8 02
+openIac        = (chr 0xfd,"open IAC")       :: Command -- fd xx where the second byte represents the IAC position
+closeIac       = (chr 0xfe,"close IAC")      :: Command -- fe xx where the second byte represents the IAC position
 -- cfd = 0xcc ::Word8  -- 204
 sndCmd80 :: MEMS (Either String BS.ByteString)
 sndCmd80 = getData req80
@@ -339,7 +338,7 @@ getData c =
     case r of
       Left  m  -> do { liftIO $ flush p ; return r }
       Right r' -> do
-              let l = toInt $ BS.index r' 0
+              let l = ord $ BS.index r' 0
               rs <- liftIO $ tryRecvNBytes p r' (l- 1)
       -- if r == BS.empty 
       --   then -- do
@@ -412,7 +411,7 @@ getIACPos = do
     Left  m  -> Error m
     Right r' -> if r' == BS.empty
       then Error "Get IAC Pos error."
-      else GotIACPos $ fromIntegral (BS.index r' 0)
+      else GotIACPos $ ord (BS.index r' 0)
 --
 incIACPos :: MEMS EvContents
 incIACPos = do
@@ -424,7 +423,7 @@ incIACPos = do
     Left  m  -> Error $ "Increment IAC Position Error as : " ++ m
     Right r' -> if r' == BS.empty
       then Error "Increment IAC Pos error."
-      else GotIACPos $ fromIntegral (BS.index r' 0)
+      else GotIACPos $ ord (BS.index r' 0)
 --
 decIACPos :: MEMS EvContents
 decIACPos = do
@@ -436,7 +435,7 @@ decIACPos = do
     Left  m  -> Error $ "Decrement IAC Position error as : " ++ m
     Right r' -> if r' == BS.empty
       then Error "Decrement IAC Pos error."
-      else GotIACPos $ fromIntegral (BS.index r' 0)
+      else GotIACPos $ ord (BS.index r' 0)
 --
 incIgAd :: MEMS EvContents
 incIgAd = do
@@ -472,10 +471,10 @@ currentTime = do
 dummyData807d :: IO Data807d
 dummyData807d = do
   g <- newStdGen
-  let r = randoms g :: [Word8]
-      r1 = take 27 r 
-      r2 = take 31 $ drop 28 r 
-  return (BS.pack (28:r1),BS.pack (32:r2))-- random807d :: IO ECU.Data807d
+  let r = randoms g :: [Char]
+      r1 = Prelude.take 27 r 
+      r2 = Prelude.take 31 $ Prelude.drop 28 r 
+  return (BS.pack (chr 28:r1),BS.pack (chr 32:r2))-- random807d :: IO ECU.Data807d
 --
 dummyFrameData :: IO Frame
 dummyFrameData = parse <$> dummyData807d
@@ -494,15 +493,15 @@ emptyFrame = Frame
   }
 -- mdata      = show . BS.unpack . mdb -- mapM (printf " %02X") . BS.unpack . mdb 
 models = [ mneUnknown, mneAuto, mne10078, mne101070, mne101170 ] -- 28 = 0x1c = \FS, 14 = 0x0. = \SO
-mneUnknown = (BS.pack [0x00,0x00,0x00,0x00], 
+mneUnknown = (BS.pack $ map chr [0x00,0x00,0x00,0x00], 
               ModelDataSet { name = "unknown                      ", d8size = 28 , d7size = 14 })
-mneAuto    = (BS.pack [0x3a, 0x00, 0x02, 0x14] {- 58,0,2,20 -}    ,
+mneAuto    = (BS.pack $ map chr [0x3a, 0x00, 0x02, 0x14] {- 58,0,2,20 -}    ,
               ModelDataSet { name = "Japanese Automatic           ", d8size = 28 , d7size = 14 })
-mne10078   = (BS.pack [0x39, 0x00, 0x00, 0x5c] {-  57, 0, 0, 92 -},
+mne10078   = (BS.pack $ map chr [0x39, 0x00, 0x00, 0x5c] {-  57, 0, 0, 92 -},
               ModelDataSet { name = "MNE10078  M/SPI Japan Cooper ", d8size = 28 , d7size = 14 })
-mne101070  = (BS.pack [0x99, 0x00, 0x02, 0x03] {- 153, 0, 2,  3 -}, 
+mne101070  = (BS.pack $ map chr [0x99, 0x00, 0x02, 0x03] {- 153, 0, 2,  3 -}, 
               ModelDataSet { name = "MNE101070 M/SPI Cooper       ", d8size = 28 , d7size = 32 })
-mne101170  = (BS.pack [0x99, 0x00, 0x03, 0x03] {- 153, 0, 3,  3 -},
+mne101170  = (BS.pack $ map chr [0x99, 0x00, 0x03, 0x03] {- 153, 0, 3,  3 -},
               ModelDataSet { name = "MNE101170 M/SPI Except Cooper", d8size = 28 , d7size = 32 })
     -- https://blogs.yahoo.co.jp/dmxbd452/5751726.html
     -- http://www.minispares.com/product/Classic/MNE101070.aspx
@@ -514,52 +513,52 @@ mname = name
 --
 parse :: Data807d -> Frame -- ここは何らかのParseライブラリを使い，可変長パラメタに対応したい
 parse (d8,d7) =  {-# SCC "parse" #-} 
-  let d8l = fromIntegral (BS.index d8 0)
-      d7l = fromIntegral (BS.index d7 0)
-      iv  = fromIntegral ( BS.index d8 8 ) -- 電圧値の10倍
-      it  = 2 * fromIntegral ( BS.index d8 9 ) -- スロットルポテンションセンサー値の50倍
+  let d8l = ord (BS.index d8 0)
+      d7l = ord (BS.index d7 0)
+      iv  = ord ( BS.index d8 8 ) -- 電圧値の10倍
+      it  = 2 * ord ( BS.index d8 9 ) -- スロットルポテンションセンサー値の50倍
   in  Frame
       { d80size     = d8l
       , d7dsize     = d7l
-      , engineSpeed = 256 * fromIntegral (BS.index d8 1) + fromIntegral (BS.index d8 2)
-      , coolantTemp = -55 + fromIntegral (BS.index d8 3)  -- 0x03	Coolant temperature in degrees C with +55 offset and 8-bit wrap
-      , ambientTemp = -55 + fromIntegral (BS.index d8 4)  -- 0x04	Computed ambient temperature in degrees C with +55 offset and 8-bit wrap
-      , intakeATemp = -55 + fromIntegral (BS.index d8 5)  -- 0x05	Intake air temperature in degrees C with +55 offset and 8-bit wrap
-      , fuelTemp    = -55 + fromIntegral (BS.index d8 6)  -- 0x06	Fuel temperature in degrees C with +55 offset and 8-bit wrap. This is not supported on the Mini SPi, and always appears as 0xFF.
-      , mapSensor   = fromIntegral ( BS.index d8 7 )      -- 0x07	MAP sensor value in kilopascals
+      , engineSpeed = 256 * ord (BS.index d8 1) + ord (BS.index d8 2)
+      , coolantTemp = -55 + ord (BS.index d8 3)  -- 0x03	Coolant temperature in degrees C with +55 offset and 8-bit wrap
+      , ambientTemp = -55 + ord (BS.index d8 4)  -- 0x04	Computed ambient temperature in degrees C with +55 offset and 8-bit wrap
+      , intakeATemp = -55 + ord (BS.index d8 5)  -- 0x05	Intake air temperature in degrees C with +55 offset and 8-bit wrap
+      , fuelTemp    = -55 + ord (BS.index d8 6)  -- 0x06	Fuel temperature in degrees C with +55 offset and 8-bit wrap. This is not supported on the Mini SPi, and always appears as 0xFF.
+      , mapSensor   = ord ( BS.index d8 7 )      -- 0x07	MAP sensor value in kilopascals
       , ibattVoltage = iv 
       , battVoltage  = 0.1 * fromIntegral iv           -- 0x08	Battery voltage, 0.1V per LSB (e.g. 0x7B == 12.3V)
       , ithrottlePot = it
       , throttlePot  = 0.01 * fromIntegral it    -- 0x09	Throttle pot voltage, 0.02V per LSB. WOT should probably be close to 0xFA or 5.0V.
-      , idleSwitch  = testBit (BS.index d8 10) 4   -- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
-      , unknown0B   = BS.index d8 11               -- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
-      , pnClosed    = fromIntegral ( BS.index d8 12 ) -- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
-      , faultCode1  = testBit (BS.index d8 13) 0   -- Coolant temp sensor
-      , faultCode2  = testBit (BS.index d8 13) 1   -- Air temp sensor 
-      , faultCode10 = testBit (BS.index d8 14) 1   -- Fules pump cirkit
-      , faultCode16 = testBit (BS.index d8 14) 7   -- Throttle position sensor
-      , unknown0F   = BS.index d8 15               -- 0x0F	Unknown
-      , unknown10   = BS.index d8 16               -- 0x10	Unknown
-      , unknown11   = BS.index d8 17               -- 0x11	Unknown
-      , idleACMP    = fromIntegral ( BS.index d8 18 ) -- 0x12	Idle air control motor position. On the Mini SPi's A-series engine, 0 is closed, and 180 is wide open.
-      , idleSpdDev  = 256 * fromIntegral (BS.index d8 19) + fromIntegral (BS.index d8 20)  -- 0x13-14	Idle speed deviation (16 bits)
-      , unknown15   = BS.index d8 21               -- 0x15	Unknown
-      , ignitionAd  = -24.0 + 0.5 * fromIntegral  (BS.index d8 22)  -- 0x16	Ignition  0.5 degrees per LSB with range of -24 deg (0x00) to 103.5 deg (0xFF)
-      , coilTime    = 0.02 * ( 256 * fromIntegral  (BS.index d8 23) + fromIntegral ( BS.index d8 24 ) ) -- 0x17-18	Coil time, 0.002 milliseconds per LSB (16 bits)
-      , unknown19   = BS.index d8 25               -- 0x19	Unknown
-      , unknown1A   = BS.index d8 26               -- 0x1A	Unknown
-      , unknown1B   = BS.index d8 27               -- 0x1B	Unknown
-      , lambda_voltage = 5 * fromIntegral  ( BS.index d7 0x06 )
-      , closed_loop'   = fromIntegral  ( BS.index d7 0x0a )
-      , fuel_trim'     = fromIntegral  ( BS.index d7 0x0c )
+      , idleSwitch  = testBit (ord $ BS.index d8 10) 4   -- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
+      , unknown0B   = ord $ BS.index d8 11               -- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
+      , pnClosed    = ord ( BS.index d8 12 ) -- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
+      , faultCode1  = testBit (ord $ BS.index d8 13) 0   -- Coolant temp sensor
+      , faultCode2  = testBit (ord $ BS.index d8 13) 1   -- Air temp sensor 
+      , faultCode10 = testBit (ord $ BS.index d8 14) 1   -- Fules pump cirkit
+      , faultCode16 = testBit (ord $ BS.index d8 14) 7   -- Throttle position sensor
+      , unknown0F   = ord $ BS.index d8 15               -- 0x0F	Unknown
+      , unknown10   = ord $ BS.index d8 16               -- 0x10	Unknown
+      , unknown11   = ord $ BS.index d8 17               -- 0x11	Unknown
+      , idleACMP    = ord ( BS.index d8 18 ) -- 0x12	Idle air control motor position. On the Mini SPi's A-series engine, 0 is closed, and 180 is wide open.
+      , idleSpdDev  = 256 * ord (BS.index d8 19) + ord (BS.index d8 20)  -- 0x13-14	Idle speed deviation (16 bits)
+      , unknown15   = ord $ BS.index d8 21               -- 0x15	Unknown
+      , ignitionAd  = -24.0 + 0.5 * fromIntegral  (ord $ BS.index d8 22)  -- 0x16	Ignition  0.5 degrees per LSB with range of -24 deg (0x00) to 103.5 deg (0xFF)
+      , coilTime    = 0.02 * ( 256 * fromIntegral  (ord $ BS.index d8 23) + fromIntegral ( ord $ BS.index d8 24 ) ) -- 0x17-18	Coil time, 0.002 milliseconds per LSB (16 bits)
+      , unknown19   = ord $ BS.index d8 25               -- 0x19	Unknown
+      , unknown1A   = ord $ BS.index d8 26               -- 0x1A	Unknown
+      , unknown1B   = ord $ BS.index d8 27               -- 0x1B	Unknown
+      , lambda_voltage = 5 * ord  ( BS.index d7 0x06 )
+      , closed_loop'   = ord  ( BS.index d7 0x0a )
+      , fuel_trim'     = ord  ( BS.index d7 0x0c )
       } 
 -- 
 -- -- |Receive bytes, given the maximum number
--- recv :: SerialPort -> Int -> IO B.ByteString
+-- recv :: SerialPort -> Int -> IO B.BS.ByteString
 -- -- |Send bytes
--- send :: SerialPort -> B.ByteString -> IO Int  -- ^ return Number of bytes actually sent
+-- send :: SerialPort -> B.BS.ByteString -> IO Int  -- ^ return Number of bytes actually sent
 -- | an action to get 1 byte ECU response as a result of an ECU command. 
-sendCommandAndGet1Byte :: SerialPort -> Word8 -> MEMS (Either String BS.ByteString)
+sendCommandAndGet1Byte :: SerialPort -> Char -> MEMS (Either String BS.ByteString)
 sendCommandAndGet1Byte p c = do
   s <- lift $ send p $ BS.singleton c
   if s == 0 then
@@ -569,7 +568,7 @@ sendCommandAndGet1Byte p c = do
       r <- liftIO $ tryIO 5 $ recv p 1 -- get echo 
       -- liftIO $ flush p
       case r of
-        Left  m  -> return $ Left $ m ++ " while waiting for echo byte."
+        Left  m  -> return $ Left $ m ++ " while waiting for echo byte ( " ++ show c ++ ")."
         Right r' -> if r' == BS.empty 
           then return $ Left $ "No Response 1 byte for " ++ show c -- BS.empty -- fail $ "ECU did not responsed while command ( " ++ show c ++ " ) was sent."
           else liftIO $ tryIO 5 $ recv p 1
@@ -606,13 +605,13 @@ tryRecv1Byte p n
       r <- recv p 1
       if r /= BS.empty then return r else tryRecv1Byte p (n-1)
 --
-toInt = fromIntegral . toInteger
+-- toInt = fromIntegral . toInteger
 -- Lirary
 --
-emptyD80 = BS.pack [0x1c,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+emptyD80 = BS.pack $ map chr [0x1c,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00] -- 28バイト
-emptyD7d = BS.pack [0x20,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+emptyD7d = BS.pack $ map chr [0x20,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00] -- 32バイト
 emptyData807d = (emptyD80, emptyD7d)
