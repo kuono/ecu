@@ -9,7 +9,7 @@ Portability : macOS X
 -}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE BangPatterns #-}
-module ECU  ( Event(..), RData(..),Frame(..), EvContents(..), UCommand (..), ModelDataSet(..)
+module ECU  ( Event, RData(..),Frame(..), EvContents(..), UCommand (..), ModelDataSet(..)
             , ECU.run,ECU.loop,parse,get807d
             , emptyD7d,emptyD80,emptyData807d, dummyData807d
             , mneUnknown,mname
@@ -56,7 +56,7 @@ data EvContents = PortNotFound FilePath
                 | OffLined
                 | Tick RData
                 | GotIACPos Int
-                | Done
+                | Done String
                 | Error String
                 deriving Eq
 -- | MEMS Commands
@@ -181,9 +181,9 @@ init (f,dc,cc,lc)= do
             if m == BS.empty || BS.length m /= 4
                 then return Nothing
                 else do
-                    tt <- forkIO $ forever $ do
+                    tt <- forkIO $ forever $ do -- | 定期的にデータ送付を命令するループスレッドを立ち上げる
                         atomically $ writeTChan cc Get807d
-                        threadDelay 500000 {- firing get807d frequency : every 0.5sec -}
+                        threadDelay 400000 {- firing get807d frequency : every 0.4 sec -}
                     let m' = lookup m models
                     md <- case m' of
                               Nothing  -> do
@@ -191,21 +191,12 @@ init (f,dc,cc,lc)= do
                                   let (d8l,d7l) = case test of
                                         Tick (d8,d7) -> (ord $ BS.index d8 0,ord $ BS.index d7 0)
                                         _            -> (28,14)
-                                  return $ (snd mneUnknown) {name = "Unknown ( " ++ show d8l ++ "," ++ show d7l ++ ")" ,d8size = d8l,d7size = d7l}
-                              Just md' -> return $ md' {name = name md' ++ "(" ++ show (d8size md') ++ "," ++ show (d7size md') ++ ")" } 
+                                  return $ (snd mneUnknown) {name = "Unknown ( " ++ show d8l ++ ":" ++ show d7l ++ ")" ,d8size = d8l,d7size = d7l}
+                              Just md' -> return $ md' {name = name md' ++ "(" ++ show (d8size md') ++ ":" ++ show (d7size md') ++ ")" } 
                     BC.writeBChan dc (j,Connected md)
                     atomically $ writeTChan lc (j,Connected md)
+                    -- atomically $ writeTChan cc GetIACPos -- ^ 2020.01.11 追記
                     return $ Just Env { path = f, port = sp, model = md, dch = dc , cch = cc , lch = lc , tickt = tt } 
---
--- | 未知のモデルについてはデータ長を調べる
--- modelcheck :: BS.ByteString -> Env -> IO ModelDataSet
--- modelcheck m e = do
---     let m' = lookup m' models
---     case m' of
---       Just m' -> return m'
---       Nothing -> do
---         runReaderT get807d Env {}
---         ModelDataSet {name = "Unknown " ++ dl}
 --
 get807d :: MEMS EvContents
 get807d =  do
@@ -241,13 +232,21 @@ data Frame = Frame
   , throttlePot :: !Float -- 0x09	Throttle pot voltage, 0.02V per LSB. WOT should probably be close to 0xFA or 5.0V.
   , ithrottlePot:: !Int
   , idleSwitch  :: !Bool  -- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
-  , unknown0B   :: !Int -- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
+  , idleByte    :: !Int
+  , unknown0B   :: !Int   -- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
   , pnClosed    :: !Int   -- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
-                         -- Fault codes. On the Mini SPi, only two bits in this location are checked:             
-  , faultCode1  :: !Bool  -- 0x0D  * Bit 0: Coolant temp sensor fault (Code 1)
-  , faultCode2  :: !Bool  --       * Bit 1: Inlet air temp sensor fault (Code 2)
-  , faultCode10 :: !Bool  -- 0x0E  * Bit 1: Fuel pump circuit fault (Code 10)
-  , faultCode16 :: !Bool  --       * Bit 7: Throttle pot circuit fault (Code 16)
+      -- Fault codes. On the Mini SPi, only two bits in this location (1,2,10,16) are checked:
+      -- ()=RoverMEMS FaultCode/[]=MiniMoni Error Num/Message, * は初期のインジェクション車によくフォルトが入るが異常ではない（キャメル）
+  , faultCode1  :: !Bool  -- 0x0D  * Bit 0: Coolant temp sensor fault                              (Code 1) : [01/COOLANT]
+  , faultCode2  :: !Bool  --       * Bit 1: Inlet air temp sensor fault                            (Code 2) : [02/Air TEMP]
+  , faultCodeX4 :: !Bool  --       * Bit 4: Maybe Ambient air temp Sensor Error (But no installed on Mini)  : Maybe [03/ERROR 05]
+  , faultCodeX5 :: !Bool  --       * Bit 5: Maybe Fuel Temp Sensor Error (But not installed on Mini)        : Maybe [04/ERROR 06]*
+  , faultCode10 :: !Bool  -- 0x0E  * Bit 1: Fuel pump circuit fault                               (Code 10)
+  , faultCodeY5 :: !Bool  --       * Bit 5: Maybe intake manifold pressure sesnor (MAP Sensor) fault        : Maybe [05/MAP SENS]
+  , faultCode16 :: !Bool  --       * Bit 7: Throttle pot circuit fault                            (Code 16) : Maybe [06/T-POT]
+      --                                                                                                                          : [07/T-POT PS]* [08/T-POT SU]* [09/CRANK NG]
+  , faultCode0D :: !Int
+  , faultCode0E :: !Int
   , unknown0F   :: !Int -- 0x0F	Unknown
   , unknown10   :: !Int -- 0x10	Unknown
   , unknown11   :: !Int -- 0x11	Unknown
@@ -340,16 +339,7 @@ getData c =
       Right r' -> do
               let l = ord $ BS.index r' 0
               rs <- liftIO $ tryRecvNBytes p r' (l- 1)
-      -- if r == BS.empty 
-      --   then -- do
-      --       -- lift $ putStrLn $ "Command (" ++ show c ++ " ) issued but no echo."
-      --       return Left "" 
-        -- else do 
-              -- lift $ putStrLn $ "expected : " ++ show l ++ " actual : " ++ show (BS.length rs)
               let l' = BS.length rs
-              -- if rs == BS.empty || l' /= l || l /= (if c == req80 then d8size (model e) else d7size (model e))
-              --     then return Left "" --BS.empty
-              --     else return $ BS.append rs r
               if rs == BS.empty 
                   then return $ Left $ "Continuous data was empty for " ++ show c
                   else if l' /= l 
@@ -375,7 +365,7 @@ clearFaults = do
     Left  m  -> Error $ "Clear Fault Error as :" ++ m
     Right r' -> if r' == BS.empty 
       then Error "Clear Fault Error."
-      else Done 
+      else Done  "Cleared Fault."
 --
 runFuelPump :: MEMS EvContents
 runFuelPump = do
@@ -387,7 +377,7 @@ runFuelPump = do
     Left  m  -> Error $ "Run fuel pump error as : " ++ m
     Right r' -> if r' == BS.empty
       then Error "Run fuel pump error."
-      else Done
+      else Done  "Started fuel pump."
 --
 stopFuelPump :: MEMS EvContents
 stopFuelPump = do
@@ -399,7 +389,7 @@ stopFuelPump = do
     Left  m  -> Error $ "Stop Fuel pump error as :" ++ m
     Right r' -> if r' == BS.empty
       then Error "Stop Fuel Pump error."
-      else Done
+      else Done  "Stopped fuel pump."
 --
 getIACPos :: MEMS EvContents
 getIACPos = do
@@ -447,7 +437,7 @@ incIgAd = do
     Left  m  -> Error $ "Increment Ignission advance error as : " ++ m
     Right r' -> if r' == BS.empty
       then Error "Increment Ignission ad error."
-      else Done
+      else Done  "Incremented Ignission ad."
 --
 decIgAd :: MEMS EvContents
 decIgAd = do
@@ -459,7 +449,7 @@ decIgAd = do
     Left  m  -> Error $ "Decrement Igmission advance error as : " ++ m
     Right r' -> if r' == BS.empty
       then Error "Decrement Ignission ad error."
-      else Done
+      else Done  "Decremented Ignission ad."
 --
 -- Library functions
 --
@@ -484,9 +474,12 @@ dummyFrameData = parse <$> dummyData807d
 emptyFrame = Frame 
   { d80size     = 28, d7dsize = 32, engineSpeed = 0 , coolantTemp = 0 , ambientTemp = 0 , intakeATemp = 0
   , fuelTemp    = 0 , mapSensor   = 0 , battVoltage = 0.0 , ibattVoltage = 0
-  , throttlePot = 0.0 , ithrottlePot = 0 , idleSwitch  = False
-  , unknown0B   = 0 , pnClosed    = 0 , faultCode1  = False , faultCode2  = False
-  , faultCode10 = False , faultCode16 = False , unknown0F   = 0 , unknown10   = 0
+  , throttlePot = 0.0 , ithrottlePot = 0 , idleSwitch  = False , idleByte = 0
+  , unknown0B   = 0 , pnClosed    = 0
+  , faultCode1  = False , faultCode2  = False , faultCodeX4 = False , faultCodeX5 = False
+  , faultCode10 = False , faultCodeY5 = False , faultCode16 = False
+  , faultCode0D = 0 , faultCode0E = 0
+  , unknown0F   = 0 , unknown10   = 0
   , unknown11   = 0 , idleACMP    = 0 , idleSpdDev  = 0 , unknown15   = 0 , ignitionAd  = 0.0
   , coilTime    = 0.0 , unknown19   = 0 , unknown1A   = 0 , unknown1B   = 0
   , lambda_voltage = 0 , closed_loop'   = 0 , fuel_trim'     = 0
@@ -527,16 +520,24 @@ parse (d8,d7) =  {-# SCC "parse" #-}
       , fuelTemp    = -55 + ord (BS.index d8 6)  -- 0x06	Fuel temperature in degrees C with +55 offset and 8-bit wrap. This is not supported on the Mini SPi, and always appears as 0xFF.
       , mapSensor   = ord ( BS.index d8 7 )      -- 0x07	MAP sensor value in kilopascals
       , ibattVoltage = iv 
-      , battVoltage  = 0.1 * fromIntegral iv           -- 0x08	Battery voltage, 0.1V per LSB (e.g. 0x7B == 12.3V)
+      , battVoltage  = 0.1 * fromIntegral iv     -- 0x08	Battery voltage, 0.1V per LSB (e.g. 0x7B == 12.3V)
       , ithrottlePot = it
       , throttlePot  = 0.01 * fromIntegral it    -- 0x09	Throttle pot voltage, 0.02V per LSB. WOT should probably be close to 0xFA or 5.0V.
       , idleSwitch  = testBit (ord $ BS.index d8 10) 4   -- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
-      , unknown0B   = ord $ BS.index d8 11               -- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
-      , pnClosed    = ord ( BS.index d8 12 ) -- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
-      , faultCode1  = testBit (ord $ BS.index d8 13) 0   -- Coolant temp sensor
-      , faultCode2  = testBit (ord $ BS.index d8 13) 1   -- Air temp sensor 
-      , faultCode10 = testBit (ord $ BS.index d8 14) 1   -- Fules pump cirkit
-      , faultCode16 = testBit (ord $ BS.index d8 14) 7   -- Throttle position sensor
+      , idleByte    = ord $ BS.index d8 10
+      , unknown0B   = ord $ BS.index d8 11        -- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
+      , pnClosed    = ord $ BS.index d8 12        -- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
+      -- ()=RoverMEMS FaultCode/[]=MiniMoni Error Num/Message, * は初期のインジェクション車によくフォルトが入るが異常ではない（キャメル）
+      , faultCode1  = testBit (fromEnum $ BS.index d8 0x0d) 0   -- CTS : Coolant temp sensor circuit fault               (Code 1) : [01/COOLANT]
+      , faultCode2  = testBit (fromEnum $ BS.index d8 0x0d) 1   -- ATS : Inlet Air temp sensor circuit fault             (Code 2) : [02/Air TEMP]
+      , faultCodeX4 = testBit (fromEnum $ BS.index d8 0x0d) 4   -- Maybe Ambient air temp Sensor Error (But no installed on Mini) : Maybe [03/ERROR 05]
+      , faultCodeX5 = testBit (fromEnum $ BS.index d8 0x0d) 5   -- Maybe Fuel Temp Sensor Error (But not installed on Mini)       : Maybe [04/ERROR 06]*
+      , faultCode10 = testBit (fromEnum $ BS.index d8 0x0e) 1   -- Fuel pump circuit fault                              (Code 10)
+      , faultCodeY5 = testBit (fromEnum $ BS.index d8 0x0e) 5   -- Maybe intake manifold pressure sesnor (MAP Sensor) fault       : Maybe [05/MAP SENS]
+      , faultCode16 = testBit (fromEnum $ BS.index d8 0x0e) 7   -- TPS Throttle position sensor cuicuit fault           (Code 16) : Maybe [06/T-POT]
+      --                                                                                                                          : [07/T-POT PS]* [08/T-POT SU]* [09/CRANK NG]
+      , faultCode0D = ord $ BS.index d8 0x0d
+      , faultCode0E = ord $ BS.index d8 0x0e
       , unknown0F   = ord $ BS.index d8 15               -- 0x0F	Unknown
       , unknown10   = ord $ BS.index d8 16               -- 0x10	Unknown
       , unknown11   = ord $ BS.index d8 17               -- 0x11	Unknown
@@ -548,9 +549,9 @@ parse (d8,d7) =  {-# SCC "parse" #-}
       , unknown19   = ord $ BS.index d8 25               -- 0x19	Unknown
       , unknown1A   = ord $ BS.index d8 26               -- 0x1A	Unknown
       , unknown1B   = ord $ BS.index d8 27               -- 0x1B	Unknown
-      , lambda_voltage = 5 * ord  ( BS.index d7 0x06 )
-      , closed_loop'   = ord  ( BS.index d7 0x0a )
-      , fuel_trim'     = ord  ( BS.index d7 0x0c )
+      , lambda_voltage = 5 * ord ( BS.index d7 0x06 )
+      , closed_loop'   = ord ( BS.index d7 0x0a )
+      , fuel_trim'     = ord ( BS.index d7 0x0c )
       } 
 -- 
 -- -- |Receive bytes, given the maximum number
@@ -614,7 +615,7 @@ emptyD80 = BS.pack $ map chr [0x1c,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
 emptyD7d = BS.pack $ map chr [0x20,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00] -- 32バイト
-emptyData807d = (emptyD80, emptyD7d)
+emptyData807d = (emptyD80, emptyD7d) :: Data807d
 
 -- data Loop        = OpenLoop | ClosedLoop deriving (Show)
 

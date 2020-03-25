@@ -10,46 +10,44 @@ Portability : macOS X
 
 module Lib where 
 
-import Control.Concurrent
 import Control.Concurrent.STM.TChan
 import qualified Control.Exception as Ex
 import Control.Monad
 import Control.Monad.STM
-import Control.Monad.IO.Class
 import qualified Brick.BChan as BC
 
 import qualified ECU
 import System.IO -- for stdin, Buffering Mode
 import System.Directory
 import System.Environment
-import qualified Data.ByteString   as BS
-import System.Hardware.Serialport
 import Data.Time.LocalTime
 import Data.Time.Clock
-import qualified Graphics.Vty as V
 import Text.Printf
 import Data.Fixed
 --
-ver   = "0.8.4"
-date  = "2019.09.21"
+ver   = "0.9.0"
+date  = "2020.01.25"
 --
 -- types
 --
 -- | For App Status on Brick
-data DataSet = DataSet { -- time :: LocalTime, stat :: ECU.Status, edat :: ECU.Frame,
-    evnt :: !ECU.Event
+data DataSet = DataSet -- time :: LocalTime, stat :: ECU.Status, edat :: ECU.Frame,
+  { evnt :: !ECU.Event
   , gdat :: !ChartData
-  , note :: !String }
+  , note :: !String
+  }
 data Status = Status
   { testmode :: !Bool     -- ^ testmode : memsを接続しないで試す
-  , model    :: !ECU.ModelDataSet
-  , rdat     :: !DataSet  -- ^ rdat  : 直近のデータセット
+  , model    :: !ECU.ModelDataSet -- ^ ECU.ModelDataSet { name :: !String, d8size :: !Int, d7size :: !Int} deriving Eq
+  , rdat     :: !DataSet  -- ^ rdat  : 直近のデータセット（読出時刻，ECUの状態，ECUのバイナリデータ）
   , dset     :: [DataSet] -- ^ dset  : 直前までのデータセット（最大 maxData個）
   , echan    :: BC.BChan Event
   , cchan    :: TChan ECU.UCommand
   , lchan    :: TChan Event
   , inmenu   :: !Bool
   , menu     :: !Menu
+  , lIacPos  :: !(Maybe Int) -- ^ latest iac position
+  , iCoolT   :: !(Maybe Int) -- ^ initial coolant temperature
   }
 -- GUI (Brick specific)
 data Name  = StatusPane | DataPane | GraphPane | NotePane | ErrorContentsPane deriving (Eq,Ord,Show) -- MenuPane | StatusPane | CommandSelectPane deriving (Eq,Ord)
@@ -57,8 +55,8 @@ type Event = ECU.Event
 -- Menu
 type Menu = String
 -- type Menu  = [MenuItem]
-testMenu = "ESC :Quit  | 1 :Initialize   | 2 :OffLine | d : Get dummy Data"
-helpMenu = "ESC :Quit  | 0 :Clear Faults | 1 :Initialize | ← :Dec IAC Pos | → :Inc IAC POS | p :Get IAC Pos | ↑ :Inc IgAd | ↓ :Dec IgAd "
+testMenu = "ESC :Quit  | 1 :Initialize   | 2 :OffLine | d : Get dummy Data" :: [Char]
+helpMenu = "ESC :Quit  | 0 :Clear Faults | 1 :Initialize | ← :Dec IAC Pos | → :Inc IAC POS | p :Get IAC Pos | ↑ :Inc IgAd | ↓ :Dec IgAd " :: [Char]
 -- data MenuItem = MenuItem
 --   { mstring    :: !String
 --   , selectable :: !Bool
@@ -102,13 +100,21 @@ data GraphItem = GraphItem {
 -- 
 -- global constants　グローパル定数
 -- 
-maxData = 60 :: Int
+maxData = 30 :: Int
 
-frameTitle  = "E Speed,coolant T,ambient T,intakeAir T,fuel T,map Sensor,btVolt,throtle Pot,idle Swch,0B,p/n switch, CTS E,IATS E, FPC E, TPC E,0F,10,11,iACMP,iSDev,15,ignAd,coil T,19,1A,1B,lmdvt,clsdl,fuelt"
-frameFmt    = "%5d,%3d,%3d,%3d,%3d,%3d,%6.2f,%6.2f,%c,%02X,%3d,%c,%c,%c,%c,%02X,%02X,%02X,%3d,%6d,%02X,%5.1f,%5.1f,%02X,%02X,%02X,%5d,%3d,%5d"
+frameTitle  = "E Speed,coolant T,ambient T,intakeAir T,fuel T,map Sensor,btVolt,throtle Pot,idle Byte,0B,p/n switch,0D,0E,0F,10,11,iACMP,iSDev,15,ignAd,coil T,19,1A,1B,lmdvt,clsdl,fuelt"
+frameFmt    = "%5d,%3d,%3d,%3d,%3d,%3d,%6.2f,%6.2f,%02X,%02X,%3d,%02X,%02X,%02X,%02X,%02X,%3d,%6d,%02X,%5.1f,%5.1f,%02X,%02X,%02X,%5d,%3d,%5d"
 
+-- black    = "\ESC[30m" 
+-- red      = "\ESC[31m" 
+-- green    = "\ESC[32m"  
+-- yellow   = "\ESC[33m"
+-- blue     = "\ESC[34m"
+-- magenta  = "\ESC[35m"
+-- cyan     = "\ESC[36m"
+-- white    = "\ESC[37m"
 
--- | グラフ描画用データセット 
+-- | グラフ描画用データセット ; でもいまは使っていない
 graphData = [engspeed,tposition,mapsensor,battvoltage,coolanttemp]
 engspeed    = GraphItem { name = "Engine Speed(rpm)",
   chr = '*',pwr = 0, minl = 0,   maxl = 24000,ul = 4000,ll = 700} 
@@ -127,8 +133,8 @@ defaultUSBPathRaspberryPi = "/dev/ttyUSB0" :: FilePath
 oldUSBPath                = "/dev/tty.usbserial-DJ00L8EZ" -- :: FilePath
 alterntUSBPath            = "/dev/tty.usbserial-FT90HWC8" -- :: FilePath
 
-initialState :: (BC.BChan Event,TChan ECU.UCommand,TChan Event) -> IO Status
-initialState (ech,cch,dch) = do
+initialState :: (BC.BChan Event,TChan ECU.UCommand,TChan Event,Bool) -> IO Status
+initialState (ech,cch,dch,tm) = do
   t <- currentTime
   a <- System.Environment.getArgs
   e <- System.Environment.getEnv "HOME"
@@ -139,7 +145,7 @@ initialState (ech,cch,dch) = do
             _     -> error "error: exactly one arguments needed."
   exist <- doesFileExist p
   return $ Status { 
-      testmode = not exist
+      testmode = not exist || tm
     , model    = snd ECU.mneUnknown
     , rdat     = DataSet {
           evnt = (t, if exist then ECU.OffLined else ECU.PortNotFound p)
@@ -156,7 +162,10 @@ initialState (ech,cch,dch) = do
     , cchan = cch
     , lchan = dch
     , inmenu = True
-    , menu   = if exist then helpMenu else testMenu }
+    , menu   = if exist then helpMenu else testMenu
+    , lIacPos = Nothing :: Maybe Int  -- ^ latest iac position
+    , iCoolT  = Nothing :: Maybe Int  -- ^ initial coolant temperature
+    }
 --
 frametoTable :: ECU.Frame -> String
 frametoTable f = {-# SCC "frametoTable" #-}
@@ -169,13 +178,16 @@ frametoTable f = {-# SCC "frametoTable" #-}
       (ECU.mapSensor   f ) -- ::Int
       (ECU.battVoltage f ) -- ::Float
       (ECU.throttlePot f ) -- ::Float
-      (tf (ECU.idleSwitch  f )) -- ::Bool ,-- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
-      (ECU.unknown0B       f )  -- ::Word8,-- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
-      (ECU.pnClosed    f ) -- 0x0C ::Park/neutral switch. Zero is closed, nonzero is open.
-      (tf (ECU.faultCode1  f )) -- 0x0D * Bit 0: Coolant temp sensor fault (Code 1)
-      (tf (ECU.faultCode2  f )) --      * Bit 1: Inlet air temp sensor fault (Code 2)
-      (tf (ECU.faultCode10 f )) -- 0x0E * Bit 1: Fuel pump circuit fault (Code 10)
-      (tf (ECU.faultCode16 f )) --      * Bit 7: Throttle pot circuit fault (Code 16)
+      --(tf (ECU.idleSwitch  f )) -- ::Bool ,-- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
+      (ECU.idleByte    f ) -- ::Int , at 0x0a 
+      (ECU.unknown0B   f ) -- ::Word8,-- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
+      (ECU.pnClosed    f ) -- :: 0x0C ::Park/neutral switch. Zero is closed, nonzero is open.
+      -- (tf (ECU.faultCode1  f )) -- 0x0D * Bit 0: Coolant temp sensor fault (Code 1)
+      -- (tf (ECU.faultCode2  f )) --      * Bit 1: Inlet air temp sensor fault (Code 2)
+      -- (tf (ECU.faultCode10 f )) -- 0x0E * Bit 1: Fuel pump circuit fault (Code 10)
+      -- (tf (ECU.faultCode16 f )) --      * Bit 7: Throttle pot circuit fault (Code 16)
+      (ECU.faultCode0D     f )
+      (ECU.faultCode0E     f )
       (ECU.unknown0F   f ) -- :: Word8, 0x0F
       (ECU.unknown10   f ) -- :: Word8, 0x10
       (ECU.unknown11   f ) -- :: Word8, 0x11
@@ -210,11 +222,12 @@ runlog ech = forever $ do
               hPutStr h $ j ++ ","
               hPutStrLn h $ case e of 
                 ECU.Tick r         -> frametoTable $ ECU.parse r
-                ECU.PortNotFound f -> "Port Not Found : " ++ f
-                ECU.Connected m    -> "Connected : " ++ ECU.mname m
-                ECU.OffLined       -> "Off Lined. "
-                ECU.Done           -> "Some Command issued."
-                ECU.Error s        -> "Error : " ++ s
+                ECU.GotIACPos p    -> " Got IAC Pos    : " ++ show p
+                ECU.PortNotFound f -> " Port Not Found : " ++ f
+                ECU.Connected m    -> " Connected      : " ++ ECU.mname m
+                ECU.OffLined       -> " Off Lined. "
+                ECU.Done m         -> " Done           : " ++ show m
+                ECU.Error s        -> " Error          : " ++ s
               hFlush h
               when (e /= ECU.OffLined) $ loop h
             `Ex.catch`
@@ -254,7 +267,10 @@ getDummyStatus s = do
         ],
         note = "Dummy Data issued."
       }
-    , dset = rdat s : dset s
+    , dset    = rdat s : dset s
+    , iCoolT  = case iCoolT s of
+                  Just _  -> iCoolT s
+                  Nothing -> Just $ ECU.coolantTemp f -- ^ initial coolant temperature
     }
 
 currentTime :: IO LocalTime
