@@ -4,10 +4,22 @@ Rover Mini MEMS Monitor
 
 programmed by Kentaro UONO
 
+## Version history
+
+- 0.10     by K.Uono on 2017.11.19
+- 0.4.1.2  by K.Uono on 2019.07.05
+- 0.4.2.0  by K.Uono on 2019.07.06
+- 0.5.0    by K.Uono on 2019.08.03 UI ralated types and functions are now defined in UI module
+- 0.5.1    by K.Uono on 2019.08.03 Dot Graphized
+- 0.7.0    by K.Uono on 2019.08.14 Brick Version
+- 0.8.0    by K.Uono on 2019.09.07 ReaderT Version
+- 0.8.1    by K.Uono on 2019.09.11 Menu Items are added.
+
 ## 基本的な使い方
+
 stack build --profile
 stack exec -- <bin_name> +RTS -p -hb
-hp2ps -e8in -c <proj_name>.hp
+stack exec -- hp2ps -e8in -c <proj_name>.hp
 　例　hp2ps -e8in -c ecu-exe.hp
  プレビューでecu-exe.psを開ける
 
@@ -15,7 +27,48 @@ stack run +RTS -p -hc
 stack test --profile --test-arguments "+RTS -hm" -- 引数の渡し方
 stack exec -- <bin_name> +RTS -p -hc
 
-返ってくるデータの意味
+
+## ECUのデータについて
+
+### 現在表示している内容
+
+ECUステータス（接続/断) ----------------------------------時刻
+ライブデータ------------------------------------------------
+Engine Speed (rpm)    : エンジン回転数
+Throttle Potent ( V ) : スロットル開度
+Map Sensor (kPa)      : MAPセンサ値
+Battery Voltage ( V ) : 蓄電池電圧
+Coolant Temp (dgC)    : 冷却液温度
+Ambient Temp (dgC)    : 環境温度
+Intake Air Temp (dgC) : 吸気温度
+Park or neutral? A/C? : AT車のインヒビタースイッチ（92はエアコン）
+Idle switch           : アイドルスイッチ
+Idl Air Ctl M P(C/O)  :
+Idl Spd deviatn       :
+Ignition advnce (deg) : 進角
+Coil Time (msc)       : コイルタイム
+Lambda voltage ( mV)  : O2センサ電圧
+Closed/open loop      :
+Fuel trim ( % )       : フューエルトリム
+Unknown 80 data (0B 0F 10 11 15 19 1A 1B)
+フォールトコード
+
+
+### MiniMoniの表示画面の意味
+
+[メーカーさんのサイト](https://richeehauser.com/mini-moni/)参照
+
+- マルチ画面   0000 I C / 0.00V 0  : 原動機回転数 アイドリング認識 O2フィードバック / TPot電圧 TPotステップ値
+- 二次燃調面   SHORT FT / 100 % CL : Short Term Fuel Trim (%) 回路開閉（CL or OP？）
+- Fault Code の例
+01:Coolant 02:Crank NG
+01:T-Pot 02:ERROR 17 - 定番のエラー
+01:Air Temp 02:Map Sens 03:Crank NG
+01:Crank NG
+01:Air Temp 02:Map Sens
+
+### ECUから返ってくるデータの意味
+
 data Frame80  = Frame80 {
         size_80     :: Int , -- 0x00	Size of data frame, including this byte. This should be 0x1C (28 bytes) for the frame described here.
         engineSpeed :: Int , -- 0x01-2	Engine speed in RPM (16 bits)
@@ -47,42 +100,59 @@ data Frame80  = Frame80 {
         unknown1B   :: Word8 -- 0x1B	Unknown
     } deriving Show
 
+### 各種センサーの役割や信号の意味
 
+[参考サイトはこちら](http://www.geocities.jp/dmxbd452/injection.html)
 
+- クランク角センサー
+約１，３～１，５KΩ　点火、燃料噴射の為の基本センサー　故障時　始動不良。
+数Ωにショートしている場合、リレーモジュールよりカチャカチャ異音発生しアクセルONでも回転上がらず。
 
-    --
-    -- 各種センサーの役割や信号の意味 <http://www.geocities.jp/dmxbd452/injection.html> より
-    -- クランク角センサー　約１，３～１，５KΩ　点火、燃料噴射の為の基本センサー　故障時　始動不良。
-    --                　数Ωにショートしている場合、リレーモジュールよりカチャカチャ異音発生しアクセルONでも回転上がらず。
-    -- MAPセンサー　　　　ECU内部に有るセンサー。点火時期、噴射時間調整の為の最重要センサー。　インテークマニホールドの負圧で電圧変化。
-    --                 大気圧時　４．５３V　　最大負圧時　６９．７mV(ミリボルト）を発生する。　から
-    --                 ホース切れ等の場合(負圧無し）　黒煙発生　点火時期不良(遅れる）　加速不良
-    --                 電圧を発生しない場合　始動性が極端に悪くなるが(セル１０回でも始動するかな？）エンストしない、パワーは無い。　
-    -- スロットルポジション　センサー(ポテンショメーター）
-    --                 実測値(今回は電圧で表示しました。スロットルボディーに付いている状態で）
-    --               　全閉時　約０，５V　　全開時　約３．０V　（これで　正常値です！故障だと思わないように！）
-    --               　０V　又は　５V出力は　センサー故障を意味するので　ECUは、故障モードになり、センサー故障がメモリーされる。
-    --               　故障時　加速不良　ACコンプレッサー作動不良。
-    -- λ(ラムダ)センサー　O2センサー
-    --                故障時　排気ガスが濃い　又は薄い　黒煙発生　エンジン不調　エンスト発生
-    --                内部にヒーター有り。国産に変更出来ますがそのままだと作動しません。　
-    -- 水温センサー,吸気温センサー Ω値特性は両方同じ　
-    --   水温センサー　 冷間時　約３．０V（１０℃　点検日の気温。　通常２０℃の抵抗値で表示する）
-    --                温間時　約０．４V（電動ファン作動時の水温時）
-    --                ０V 　又は　５V出力時は、センサー故障とECUがみなし故障モードになり、故障がメモリーにインプットされる。
-    --                水温センサー故障時は冷間時の始動不良になる。（キャブ車のチョーク作動不良と同じ）
-    --                故障モードは、　水温６０℃　吸気温３５℃に設定　　　年式により黒煙を発生するＥＣＵ有り
-    -- ステッパーモーター約１５Ω　　７．５度ステップのモーター　アイドリング回転数の調整用。　AC作動時、AT車のR、D時（P、N以外）、
-    --                電気負荷の大きい時等アイドル・アップさせる。ハンダ割れ、水浸入による固着故障有り。
-    -- PTCヒーター      インテーク・マニホールドを暖めるヒーター　水温が上昇するとOFFする。　時々焼損していて振るとカラカラ音の
-    --                発生するPTC有り。冷間時の始動性にはあまり関係無い。排気ガス対策と思われます。理由は、スイッチＯＮでは作動
-    --                しません。エンジン始動後ＰＴＣリレーがＯＮする。通電後数秒で手で触れない位熱くなる。
-    
-    -- [How do lambda sensors work]
-    -- https://mechanics.stackexchange.com/questions/23933/how-do-lambda-sensors-work
-    Lambda sensors work at elevated temperatures, around 300 °C (600 °F); many lambda sensors contain a resistive heater element to help get them up to temperature quickly.
+- MAPセンサー
+ECU内部に有るセンサー。点火時期、噴射時間調整の為の最重要センサー。　インテークマニホールドの負圧で電圧変化。                大気圧時　４．５３V　　最大負圧時　６９．７mV(ミリボルト）を発生する。　から
+ホース切れ等の場合(負圧無し）　黒煙発生　点火時期不良(遅れる）　加速不良
+電圧を発生しない場合　始動性が極端に悪くなるが(セル１０回でも始動するかな？）エンストしない、パワーは無い。
 
-[Rover Mini Electlic Fuel Injection について ]<http://www.tmsmini.com/cooper/sp_acr.htm> より
+- スロットルポジション　センサー(ポテンショメーター）
+実測値(今回は電圧で表示しました。スロットルボディーに付いている状態で）
+全閉時　約0.5V　　全開時　約3.0V　（これで　正常値です！故障だと思わないように！）
+0V 又は 5V 出力は　センサー故障を意味するので　ECUは、故障モードになり、センサー故障がメモリーされる。
+故障時　加速不良　ACコンプレッサー作動不良。
+
+- λ(ラムダ)センサー　O2センサー
+故障時　排気ガスが濃い　又は薄い　黒煙発生　エンジン不調　エンスト発生
+内部にヒーター有り。国産に変更出来ますがそのままだと作動しません。
+
+- 水温センサー,吸気温センサー Ω値特性は両方同じ
+
+- 水温センサー
+冷間時　約3.0V（点検日の気温 10℃。　通常20℃ の抵抗値で表示する）
+温間時　約0.4V（電動ファン作動時の水温時）
+0V 又は 5V 出力時は、センサー故障とECUがみなし故障モードになり、故障がメモリーにインプットされる。
+水温センサー故障時は冷間時の始動不良になる。（キャブ車のチョーク作動不良と同じ）
+故障モードは、　水温60℃　吸気温35℃に設定　　　年式により黒煙を発生するＥＣＵ有り
+
+- ステッパーモーター
+7.5度ステップのモーター。アイドリング回転数の調整用。約１５Ω。
+AC作動時、AT車のR、D時（P、N以外）、電気負荷の大きい時等アイドル・アップさせる。
+ハンダ割れ、水浸入による固着故障有り。
+
+- PTCヒーター
+インテーク・マニホールドを暖めるヒーター。水温が上昇するとOFFする。
+時々焼損していて振るとカラカラ音の発生するPTC有り。
+冷間時の始動性にはあまり関係無い。排気ガス対策と思われます。理由は、スイッチＯＮでは作動しません。
+エンジン始動後ＰＴＣリレーがＯＮする。通電後数秒で手で触れない位熱くなる。
+
+### what is ptc
+
+Positive temperature coefficient (PTC) characteristics 自己温度制御ヒータ
+
+### ラムダセンサの働き
+
+[How do lambda sensors work](https://mechanics.stackexchange.com/questions/23933/how-do-lambda-sensors-work)
+Lambda sensors work at elevated temperatures, around 300 °C (600 °F); many lambda sensors contain a resistive heater element to help get them up to temperature quickly.
+
+[Rover Mini Electlic Fuel Injection について](http://www.tmsmini.com/cooper/sp_acr.htm)
 
 - 各種データについて（１）-- Rover Pod 1より
 -- RPM            : エンジン回転数
@@ -154,9 +224,10 @@ low resistance = rich condition, high resistance = lean condition
     -- * Many other input sensors that can be used include the temperature of the intake air (especially 
     --   important for a Mini using forced induction), a sensor indicating which gear you have selected and 
     --   many more I don't have room to list.
- 
 
-     -- https://blogs.yahoo.co.jp/dmxbd452/5751726.html
+## Rover Mini の ECUの型式
+
+    -- https://blogs.yahoo.co.jp/dmxbd452/5751726.html
     -- http://www.minispares.com/product/Classic/MNE101070.aspx
     -- Part number	Manual / Automatic	Attributes	              VIN No. From - VIN No. To 
     -- MNE10026	 Automatic	SPI -         Except Cooper	 	              - 59844
@@ -177,4 +248,3 @@ low resistance = rich condition, high resistance = lean condition
     -- MNE101361 Automatic	SPI - Air Con - Except UK - 1996 on	134455 - 	 
     
     -- ^ original number for size of Frame 7d = 32
-
