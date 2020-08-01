@@ -9,7 +9,7 @@ Portability : macOS X
 -}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE BangPatterns #-}
-module ECU  ( Event, RData, Frame(..), EvContents(..), UCommand (..), ModelDataSet(..)
+module ECU  ( Event, RData(..),Frame(..), EvContents(..), UCommand (..), ModelDataSet(..)
             , ECU.run,ECU.loop,parse,get807d
             , emptyD7d,emptyD80,emptyData807d, dummyData807d
             , mneUnknown,mname
@@ -24,26 +24,26 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.STM
 import Control.Monad.Trans.Class
--- import Control.Monad.Trans.Except (ExceptT,runExceptT,throwE)
+import Control.Monad.Trans.Except (ExceptT,runExceptT,throwE)
 import Control.Monad.Trans.Reader
--- import Control.Monad.Trans.State
+import Control.Monad.Trans.State
 import Data.Bits
 import Data.Char
--- import Data.Fixed
--- import Data.List.Split
+import Data.Fixed
+import Data.List.Split
 import Data.Time.LocalTime
 import Data.Time.Clock
--- import Data.Typeable
--- import qualified Data.Vector as V
--- import Data.Word
--- import Numeric
--- import qualified System.Posix.Unistd as U
+import Data.Typeable
+import qualified Data.Vector as V
+import Data.Word
+import Numeric
+import qualified System.Posix.Unistd as U
 import System.Hardware.Serialport 
 import System.Directory 
--- import System.IO -- for stdin, Buffering Mode
+import System.IO -- for stdin, Buffering Mode
 import System.Random
--- import qualified System.Timeout as TM
--- import Text.Printf
+import qualified System.Timeout as TM
+import Text.Printf
 --
 -- definitions for export
 --
@@ -66,12 +66,12 @@ type RData    = Data807d
 -- | Ecu model and its identical data
 data ModelDataSet = ModelDataSet { name :: !String, d8size :: !Int, d7size :: !Int} deriving Eq
 -- instance Show ModelDataSet where show  = show . name 
--- type Models = [(BS.ByteString , ModelDataSet)]
--- data ActuatorCmdDataSet = DefMinMax { def:: !Int,min:: !Int,max:: !Int} -- ^ (Default value, Minimum, Maximum)
--- fuelTrimDftMinMax  = DefMinMax 0x8a 0x00 0xfe  -- for MNE101170
--- idleDecayDftMinMax = DefMinMax 0x23 0x0a 0x3c  -- for MNE101170
--- idleSpeedDftMinMax = DefMinMax 0x80 0x78 0x88  -- for MNE101170
--- ignAdvOffDftMinMax = DefMinMax 0x80 0x74 0x8c  -- for MNE101170
+type Models = [(BS.ByteString , ModelDataSet)]
+data ActuatorCmdDataSet = DefMinMax { def:: !Int,min:: !Int,max:: !Int} -- ^ (Default value, Minimum, Maximum)
+fuelTrimDftMinMax  = DefMinMax 0x8a 0x00 0xfe  -- for MNE101170
+idleDecayDftMinMax = DefMinMax 0x23 0x0a 0x3c  -- for MNE101170
+idleSpeedDftMinMax = DefMinMax 0x80 0x78 0x88  -- for MNE101170
+ignAdvOffDftMinMax = DefMinMax 0x80 0x74 0x8c  -- for MNE101170
 -- | MEMS Monad related
 data Env  = Env 
     { path  :: !FilePath
@@ -85,66 +85,44 @@ data Env  = Env
 type MEMS = ReaderT Env IO
 -- instance Monad MEMS where
 --
--- type InitBytePair = (Maybe Word8, Word8) -- [( command byte , expected response )] 
--- initSeq :: [InitBytePair]
--- initSeq =  [(Just 0xca, 0xca),(Just 0x75,0x75),(Just 0xf4,0xf4),(Nothing, 0x00),(Just 0xd0,0xd0)]
---
 run ::  MEMS a -> (FilePath,BC.BChan Event,TChan UCommand,TChan Event) -> IO ()
 run c r = Ex.bracket {- :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
-  -- for resource acquisition ( opening )
-  (ECU.init r) -- -> IO (Maybe Env)
-  -- for resource releasoe ( closing )
-  (\case       --  
+  (ECU.init r)
+  (\case
       Nothing -> return () -- fail "Some error occured while running ecu."
       Just e' -> do
-          flush $ port e'
-          closeSerial $ port e'
           t <- currentTime
           let e = OffLined
-          BC.writeBChan (dch e') (t,e)
+          BC.writeBChan (dch e') (t,e) 
+          flush $ port e'
+          closeSerial $ port e'
           killThread $ tickt e'
       )
-  -- | for using resources
-  (\case      -- Maybe Env
-      Nothing  -> return () -- fail "ECU Initialization failed."
-      Just env -> do {  threadDelay 10000 ; runReaderT c env ; return () } ) -- start loop
-      -- threadDelay inserted on 10th April 2020 for testing wether or not having 
-      -- effect to continuous connection for inital usstable term. K.UONO
+  (\case
+      Nothing -> return () -- fail "Initialization failed."
+      Just e' -> do { runReaderT c e' ; return () } )
 --
 loop :: MEMS ()
 loop = do
-    env <- ask
-    let cmdchan = cch  env
-        devfile = path env
-        clearchan = do
-          d <- atomically $ tryReadTChan cmdchan
-          case d of
-              Just _  -> clearchan
-              Nothing -> return () 
-    exist <- lift $ doesFileExist devfile
-    if not exist 
-      then do -- device file が存在しない（つまりUSBにRS232Cコンバータが接続されていなかった場合）
+    e <- ask
+    let command = cch  e
+        f       = path e
+    exist <- lift $ doesFileExist f
+    if not exist
+      then do
           report $ Error "Device Not Exist."
-          return () -- ループから抜ける
-      else do -- device file が存在していた場合（つまりUSBにRS232Cコンバータが接続されていた場合）
-          c <- lift $ atomically $ readTChan cmdchan
-          r <- res c -- do command on mems
-          report r -- データチャネルおよびログに結果を書き込む
-          if c == Disconnect -- 命令が切断だった場合，
-            then do { lift clearchan ; return () } -- ループから抜ける
-            else case r of   -- 命令が切断 Disconnect でなかった場合，
-                -- つまり Init | Get807d | ClearFaults | RunFuelPump | StopFuelPump 
-                -- | GetIACPos | IncIACPos | DecIACPos | IncIgAd | DecIgAd | TestActuator
-                -- のいずれかだった場合，
-                -- レスポンスによって条件分岐
-                PortNotFound _ -> do {  lift clearchan ; return () }
-                OffLined       -> do {  lift clearchan ; return () }
-                Error _        -> do {  lift clearchan ; return () }
+          return () -- ループから抜ける；test mode は考えなくて良い
+      else do
+          c <- lift $ atomically $ readTChan command
+          r <- res c -- do command of mems
+          report r
+          if c == Disconnect
+            then return () -- ループから抜ける；test mode は考えなくて良い
+            else case r of
+                PortNotFound _ -> return ()
+                OffLined       -> return ()
+                Error _ -> return () -- ループから抜ける；test mode は考えなくて良い
                 _       -> loop
-                -- Connected ModelDataSet
-                -- GotIACPos Int
-                -- Done String
-        
 --
 report :: EvContents -> MEMS ()
 report c = do
@@ -186,7 +164,6 @@ init (f,dc,cc,lc)= do
             return Nothing
         else do
             sp   <- openSerial f defaultSerialSettings { commSpeed = CS9600, timeout= 1, flowControl = Software }
-            --
             r1   <- send sp $ BS.singleton (chr 0xca)  -- 202 'ha no hankaku' 
             r1'  <- tryRecv1Byte sp 5
             -- putStrLn $ "r1 = " ++ show r1 ++ ":" ++ show r1'
@@ -198,22 +175,24 @@ init (f,dc,cc,lc)= do
             r3'' <- tryRecv1Byte sp 5
             r4   <- send sp $ BS.singleton (chr 0xd0)  -- 208 'mi no hankaku'
             r4'  <- tryRecv1Byte sp 5
-            m <- tryRecvNBytes sp BS.empty 4 -- ^ モデルデータの読みとり
+            m <- tryRecvNBytes sp BS.empty 4
+            -- recv p 4 だと取りこぼす（（0.5秒間位の連続リレー音）
+            -- putStrLn $ "4bytes = " ++ show m
             if m == BS.empty || BS.length m /= 4
                 then return Nothing
                 else do
                     tt <- forkIO $ forever $ do -- | 定期的にデータ送付を命令するループスレッドを立ち上げる
                         atomically $ writeTChan cc Get807d
                         threadDelay 400000 {- firing get807d frequency : every 0.4 sec -}
-                    let m' = lookup m models  -- モデルデータを調べる
+                    let m' = lookup m models
                     md <- case m' of
-                        Nothing  -> do -- モデルデータが未知の場合，データを1セット読み出してデータ長を調べる。
-                            test <- runReaderT get807d $ Env { path = f, port = sp, model = snd mneUnknown, dch = dc , cch = cc , lch = lc , tickt = tt } 
-                            let (d8l,d7l) = case test of
-                                  Tick (d8,d7) -> (ord $ BS.index d8 0,ord $ BS.index d7 0)
-                                  _            -> (28,14)
-                            return $ (snd mneUnknown) {name = "Unknown ( " ++ show d8l ++ ":" ++ show d7l ++ ")" ,d8size = d8l,d7size = d7l}
-                        Just md' -> return $ md' {name = name md' ++ "(" ++ show (d8size md') ++ ":" ++ show (d7size md') ++ ")" } 
+                              Nothing  -> do
+                                  test <- runReaderT get807d $ Env { path = f, port = sp, model = snd mneUnknown, dch = dc , cch = cc , lch = lc , tickt = tt } 
+                                  let (d8l,d7l) = case test of
+                                        Tick (d8,d7) -> (ord $ BS.index d8 0,ord $ BS.index d7 0)
+                                        _            -> (28,14)
+                                  return $ (snd mneUnknown) {name = "Unknown ( " ++ show d8l ++ ":" ++ show d7l ++ ")" ,d8size = d8l,d7size = d7l}
+                              Just md' -> return $ md' {name = name md' ++ "(" ++ show (d8size md') ++ ":" ++ show (d7size md') ++ ")" } 
                     BC.writeBChan dc (j,Connected md)
                     atomically $ writeTChan lc (j,Connected md)
                     -- atomically $ writeTChan cc GetIACPos -- ^ 2020.01.11 追記
@@ -228,7 +207,7 @@ get807d =  do
     Right r8'  ->   
       if r8' == BS.empty then do
           lift $ flush $ port e -- 取りこぼし対策。
-          return $ Error "Error in getting 80 data. Empty Response."
+          return $ Error "error in getting 80 data."
       else do
           r7 <- sndCmd7d
           case r7 of
@@ -236,7 +215,7 @@ get807d =  do
             Right r7' ->
               if r7' == BS.empty then do
                   liftIO $ flush $ port e -- 取りこぼし対策。
-                  return $ Error "Error in getting 7d data. Empty Response."
+                  return $ Error "error in getting 7d data."
               else
                   return $ Tick (r8',r7')
 --
@@ -290,9 +269,6 @@ data Frame = Frame
 -- | ECU Commands
 type Command  = (Char,String) -- ^ ECU returns echo and one result byte. Command byte (send to ECU), Num of Response following bytes from ECU
 type Command' = (Char,String) -- ^ ECU returns only echo byte.
-opnfp, opnpr, opnac, clspv, opnO2, clsfp, clspr, clsac, opnpv, clsO2, clsf1, clsf2, icrft, dcrft :: Command
-icrft', dcrft', req7d, req80 , incid, decid, incis, decil, incia, decia :: Command
-clrft, htbt, actfi, figcl, reqip, opiac, cliac, rqiac :: Command
 opnfp = (chr 0x01,"Open Fuel Pump relay =stop"):: Command -- Open fuel pump relay (stop fuel pump) 
 opnpr = (chr 0x02,"Open PTC Relay")            :: Command -- Open PTC relay (inlet manifold heater)
 opnac = (chr 0x03,"Open A/C Relay")            :: Command -- Open air conditioning relay 
@@ -334,8 +310,6 @@ rqiac = (chr 0xff,"Request current IAC pos?")  :: Command
 --   AC relay, PTC relay, and fuel pump relay automatically after a short time 
 --   (i.e. without requiring the 'off' command). The 'off' command is acknowledged
 --   by the ECU, but apparently has no effect.
-fuelPumpOn, fuelPumpOff, ptcRelayOn, ptcRelayOff, acRelayOn, acRelayOff :: Command
-testInjectors, fireCoil, openIac, closeIac :: Command
 fuelPumpOn     = (chr 0x11,"Fuel Pump on")   :: Command -- 11 00
 fuelPumpOff    = (chr 0x01,"Fuel Pump off")  :: Command -- 01 00
 ptcRelayOn     = (chr 0x12,"ptc Relay on")   :: Command -- 12 00
@@ -361,7 +335,7 @@ getData c =
         p  = port e
     r  <- sendCommandAndGet1Byte p c'
     case r of
-      Left  _  -> do { liftIO $ flush p ; return r }
+      Left  m  -> do { liftIO $ flush p ; return r }
       Right r' -> do
               let l = ord $ BS.index r' 0
               rs <- liftIO $ tryRecvNBytes p r' (l- 1)
@@ -492,29 +466,26 @@ dummyData807d = do
       r2 = Prelude.take 31 $ Prelude.drop 28 r 
   return (BS.pack (chr 28:r1),BS.pack (chr 32:r2))-- random807d :: IO ECU.Data807d
 --
--- dummyFrameData :: IO Frame
--- dummyFrameData = parse <$> dummyData807d
+dummyFrameData :: IO Frame
+dummyFrameData = parse <$> dummyData807d
 --
 -- constants
 --
--- emptyFrame :: Frame
--- emptyFrame = Frame 
---   { d80size     = 28, d7dsize = 32, engineSpeed = 0 , coolantTemp = 0 , ambientTemp = 0 , intakeATemp = 0
---   , fuelTemp    = 0 , mapSensor   = 0 , battVoltage = 0.0 , ibattVoltage = 0
---   , throttlePot = 0.0 , ithrottlePot = 0 , idleSwitch  = False , idleByte = 0
---   , unknown0B   = 0 , pnClosed    = 0
---   , faultCode1  = False , faultCode2  = False , faultCodeX4 = False , faultCodeX5 = False
---   , faultCode10 = False , faultCodeY5 = False , faultCode16 = False
---   , faultCode0D = 0 , faultCode0E = 0
---   , unknown0F   = 0 , unknown10   = 0
---   , unknown11   = 0 , idleACMP    = 0 , idleSpdDev  = 0 , unknown15   = 0 , ignitionAd  = 0.0
---   , coilTime    = 0.0 , unknown19   = 0 , unknown1A   = 0 , unknown1B   = 0
---   , lambda_voltage = 0 , closed_loop'   = 0 , fuel_trim'     = 0
---   }
+emptyFrame = Frame 
+  { d80size     = 28, d7dsize = 32, engineSpeed = 0 , coolantTemp = 0 , ambientTemp = 0 , intakeATemp = 0
+  , fuelTemp    = 0 , mapSensor   = 0 , battVoltage = 0.0 , ibattVoltage = 0
+  , throttlePot = 0.0 , ithrottlePot = 0 , idleSwitch  = False , idleByte = 0
+  , unknown0B   = 0 , pnClosed    = 0
+  , faultCode1  = False , faultCode2  = False , faultCodeX4 = False , faultCodeX5 = False
+  , faultCode10 = False , faultCodeY5 = False , faultCode16 = False
+  , faultCode0D = 0 , faultCode0E = 0
+  , unknown0F   = 0 , unknown10   = 0
+  , unknown11   = 0 , idleACMP    = 0 , idleSpdDev  = 0 , unknown15   = 0 , ignitionAd  = 0.0
+  , coilTime    = 0.0 , unknown19   = 0 , unknown1A   = 0 , unknown1B   = 0
+  , lambda_voltage = 0 , closed_loop'   = 0 , fuel_trim'     = 0
+  }
 -- mdata      = show . BS.unpack . mdb -- mapM (printf " %02X") . BS.unpack . mdb 
-models :: [(BS.ByteString, ModelDataSet)]
 models = [ mneUnknown, mneAuto, mne10078, mne101070, mne101170 ] -- 28 = 0x1c = \FS, 14 = 0x0. = \SO
-mneUnknown, mneAuto, mne10078,mne101070,mne101170 :: (BS.ByteString, ModelDataSet)
 mneUnknown = (BS.pack $ map chr [0x00,0x00,0x00,0x00], 
               ModelDataSet { name = "unknown                      ", d8size = 28 , d7size = 14 })
 mneAuto    = (BS.pack $ map chr [0x3a, 0x00, 0x02, 0x14] {- 58,0,2,20 -}    ,
@@ -617,14 +588,14 @@ tryIO n a -- try n times action
         return $ Right r
 --
 tryRecvNBytes :: SerialPort -> BS.ByteString -> Int -> IO BS.ByteString
-tryRecvNBytes ecuport !acc n =  
+tryRecvNBytes port !acc n =  
     if n <= 0
       then return acc
       else do
-        r <- tryRecv1Byte ecuport 10
+        r <- tryRecv1Byte port 10
         if r == BS.empty
           then return acc
-          else do threadDelay 1000 ; tryRecvNBytes ecuport (BS.append acc r) (n - 1)
+          else do threadDelay 1000 ; tryRecvNBytes port (BS.append acc r) (n - 1)
 -- | repeat n times to read 1 byte from ecu
 tryRecv1Byte :: SerialPort
              -> Int              -- ^ times to try
@@ -638,15 +609,13 @@ tryRecv1Byte p n
 -- toInt = fromIntegral . toInteger
 -- Lirary
 --
-emptyD80, emptyD7d :: BS.ByteString
 emptyD80 = BS.pack $ map chr [0x1c,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00] -- 28バイト
 emptyD7d = BS.pack $ map chr [0x20,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00] -- 32バイト
-emptyData807d :: Data807d
-emptyData807d = (emptyD80, emptyD7d)
+emptyData807d = (emptyD80, emptyD7d) :: Data807d
 
 -- data Loop        = OpenLoop | ClosedLoop deriving (Show)
 
