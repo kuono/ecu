@@ -15,7 +15,6 @@ import qualified Control.Exception as Ex
 import Control.Monad
 import Control.Monad.STM
 import qualified Brick.BChan as BC
-import qualified Data.Vector.Mutable as VM
 
 import qualified ECU
 import System.IO -- for stdin, Buffering Mode
@@ -26,10 +25,8 @@ import Data.Time.Clock
 import Text.Printf
 import Data.Fixed
 --
-ver   :: String
-ver   = "0.9.1"
-date  :: String
-date  = "2020.04.10"
+ver   = "0.9.0"
+date  = "2020.01.25"
 --
 -- types
 --
@@ -39,36 +36,26 @@ data DataSet = DataSet -- time :: LocalTime, stat :: ECU.Status, edat :: ECU.Fra
   , gdat :: !ChartData
   , note :: !String
   }
-
-data DataBuffer s = DataBuffer 
-    { container :: VM.MVector s DataSet
-    , len :: Int
-    , pos :: Int
-    , hd  :: Int
-    , ed  :: Int
-    }
 data Status = Status
-    { testmode :: !Bool     -- ^ testmode : memsを接続しないで試す
-    , model    :: !ECU.ModelDataSet -- ^ ECU.ModelDataSet { name :: !String, d8size :: !Int, d7size :: !Int} deriving Eq
-    , rdat     :: !DataSet  -- ^ rdat  : 直近のデータセット（読出時刻，ECUの状態，ECUのバイナリデータ）
-    , dset     :: DataBuffer  -- ^ dset  : 直前までのデータセット（最大 maxData個）
-    , echan    :: BC.BChan Event
-    , cchan    :: TChan ECU.UCommand
-    , lchan    :: TChan Event
-    , inmenu   :: !Bool
-    , menu     :: !Menu
-    , lIacPos  :: !(Maybe Int) -- ^ latest iac position
-    , iCoolT   :: !(Maybe Int) -- ^ initial coolant temperature
-    }
+  { testmode :: !Bool     -- ^ testmode : memsを接続しないで試す
+  , model    :: !ECU.ModelDataSet -- ^ ECU.ModelDataSet { name :: !String, d8size :: !Int, d7size :: !Int} deriving Eq
+  , rdat     :: !DataSet  -- ^ rdat  : 直近のデータセット（読出時刻，ECUの状態，ECUのバイナリデータ）
+  , dset     :: [DataSet] -- ^ dset  : 直前までのデータセット（最大 maxData個）
+  , echan    :: BC.BChan Event
+  , cchan    :: TChan ECU.UCommand
+  , lchan    :: TChan Event
+  , inmenu   :: !Bool
+  , menu     :: !Menu
+  , lIacPos  :: !(Maybe Int) -- ^ latest iac position
+  , iCoolT   :: !(Maybe Int) -- ^ initial coolant temperature
+  }
 -- GUI (Brick specific)
 data Name  = StatusPane | DataPane | GraphPane | NotePane | ErrorContentsPane deriving (Eq,Ord,Show) -- MenuPane | StatusPane | CommandSelectPane deriving (Eq,Ord)
 type Event = ECU.Event 
 -- Menu
 type Menu = String
 -- type Menu  = [MenuItem]
-testMenu :: String 
-testMenu = "ESC :Quit  | 1 :Initialize   | 2 :OffLine | d : Get dummy Data"
-helpMenu :: String
+testMenu = "ESC :Quit  | 1 :Initialize   | 2 :OffLine | d : Get dummy Data" :: [Char]
 helpMenu = "ESC :Quit  | 0 :Clear Faults | 1 :Initialize | ← :Dec IAC Pos | → :Inc IAC POS | p :Get IAC Pos | ↑ :Inc IgAd | ↓ :Dec IgAd " :: [Char]
 -- data MenuItem = MenuItem
 --   { mstring    :: !String
@@ -113,12 +100,9 @@ data GraphItem = GraphItem {
 -- 
 -- global constants　グローパル定数
 -- 
-maxData :: Int
-maxData = 30
+maxData = 30 :: Int
 
-frameTitle  :: String
 frameTitle  = "E Speed,coolant T,ambient T,intakeAir T,fuel T,map Sensor,btVolt,throtle Pot,idle Byte,0B,p/n switch,0D,0E,0F,10,11,iACMP,iSDev,15,ignAd,coil T,19,1A,1B,lmdvt,clsdl,fuelt"
-frameFmt    :: String
 frameFmt    = "%5d,%3d,%3d,%3d,%3d,%3d,%6.2f,%6.2f,%02X,%02X,%3d,%02X,%02X,%02X,%02X,%02X,%3d,%6d,%02X,%5.1f,%5.1f,%02X,%02X,%02X,%5d,%3d,%5d"
 
 -- black    = "\ESC[30m" 
@@ -131,9 +115,7 @@ frameFmt    = "%5d,%3d,%3d,%3d,%3d,%3d,%6.2f,%6.2f,%02X,%02X,%3d,%02X,%02X,%02X,
 -- white    = "\ESC[37m"
 
 -- | グラフ描画用データセット ; でもいまは使っていない
-graphData :: [GraphItem]
 graphData = [engspeed,tposition,mapsensor,battvoltage,coolanttemp]
-engspeed, tposition, mapsensor, battvoltage, coolanttemp :: GraphItem
 engspeed    = GraphItem { name = "Engine Speed(rpm)",
   chr = '*',pwr = 0, minl = 0,   maxl = 24000,ul = 4000,ll = 700} 
 tposition   = GraphItem { name = "Throttle Pot( V )",
@@ -146,12 +128,10 @@ coolanttemp = GraphItem { name = "Coolant Temp(\'C )",
   chr = 'C',pwr = 1, minl = -55, maxl = 120,  ul =98,   ll = -20}
 
 -- | デバイス名が指定されなかった場合に使うパス名　
-defaultUSBPathMac :: FilePath 
-defaultUSBPathMac         = "/dev/tty.usbserial-DO01OV70"
-defaultUSBPathRaspberryPi :: FilePath
-defaultUSBPathRaspberryPi = "/dev/ttyUSB0"
--- oldUSBPath                = "/dev/tty.usbserial-DJ00L8EZ" -- :: FilePath
--- alterntUSBPath            = "/dev/tty.usbserial-FT90HWC8" -- :: FilePath
+defaultUSBPathMac         = "/dev/tty.usbserial-DO01OV70" :: FilePath 
+defaultUSBPathRaspberryPi = "/dev/ttyUSB0" :: FilePath
+oldUSBPath                = "/dev/tty.usbserial-DJ00L8EZ" -- :: FilePath
+alterntUSBPath            = "/dev/tty.usbserial-FT90HWC8" -- :: FilePath
 
 initialState :: (BC.BChan Event,TChan ECU.UCommand,TChan Event,Bool) -> IO Status
 initialState (ech,cch,dch,tm) = do
@@ -222,6 +202,7 @@ frametoTable f = {-# SCC "frametoTable" #-}
       (ECU.lambda_voltage f) -- :: Int
       (ECU.closed_loop'   f) -- :: Int
       (ECU.fuel_trim'     f) -- :: Int 
+    where tf c = if c then 'T' else 'F'
 --
 -- log
 --
@@ -309,13 +290,13 @@ localTimetoString (LocalTime n t) =
     in printf "%10s,%02d:%02d:%5s " hi ji hun byo'
 
 ratio:: (Real a) => a -> a -> (ECU.Frame -> a) -> Status -> Float 
-ratio saite saiko f s = case (d' <= saite,d' >= saiko) of
+ratio min max f s = case (d' <= min,d' >= max) of
   (True , _ )  -> 0.0
   (_ , True )  -> 1.0
-  _            -> fromRational ((toRational d' - toRational saite ) / (toRational saiko - toRational saite))
+  _            -> fromRational ((toRational d' - toRational min ) / (toRational max - toRational min))
   where d' = case snd . evnt $ rdat s of
                ECU.Tick r -> f $ ECU.parse r
-               _          -> saite
+               _          -> min
 
 -- System.DispSpace.getAvailSpace :: FilePath -> IO Integer
 -- ^ A convenience function that directly returns the diskAvail field from the result of getDiskUsage. If a large amount of data is to be written in a directory, calling this function for that directory can be used to determine whether the operation will fail because of insufficient disk space.
