@@ -14,56 +14,43 @@ import Lib
 import qualified ECU
 -- import Control.Monad
 -- import Control.Monad.IO.Class
--- import Control.Monad.STM
--- import Control.Monad.Trans.Writer
--- import Control.Monad.Trans.Reader 
--- import Control.Monad.Trans.Class
--- import Control.Concurrent
+import Control.Monad.STM
+import Control.Monad.Trans.Writer
+import Control.Monad.Trans.Reader 
+import Control.Monad.Trans.Class
+import Control.Concurrent
 -- import Control.Concurrent.STM.TChan
 -- import qualified Control.Exception as Ex
 -- import qualified Data.ByteString   as BS
 import Data.Time.LocalTime
-import qualified Data.Vector.Mutable as VM
 import Text.Printf
+
 import Brick
--- import Brick.BChan (newBChan, writeBChan)
+import Brick.BChan (newBChan, writeBChan)
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.Border.Style as BS
 import qualified Brick.Widgets.ProgressBar as BP
--- import qualified Brick.Widgets.Center as C
+import qualified Brick.Widgets.Center as C
 import qualified Graphics.Vty as V
 import Graphics.Vty
 import Brick.BorderMap
 -- import Data.Sequence (Seq)
 -- import qualified Data.Sequence as S
-import TextPlot ( PlotConfig(..) , PlotColour(..) , PlotFunction
-                --, ParamFunction(..)
-                , (.+),(.|),(.-)
-                , plotStrWithConfig
-                , emptyXYPlot
-                -- , Line, Cell ,plotCellWithConfig,
-                )
+import TextPlot (PlotConfig(..),ParamFunction(..),PlotFunction,(.+),(.|),(.-),
+                 PlotColour(..),Line,Cell,
+                 plotStrWithConfig,plotCellWithConfig,emptyXYPlot,)
 -- import Linear.V2 (V2(..))
 import Lens.Micro ((^.))   
 --
-maxGraphLength :: Int  -- ^ Graph Plot Area width limitation
 maxGraphLength = 20
 -- 
 -- UI Name space
 -- 
 data Display = Dialog | DataPanel | CurrentStatus | CurrentData | GraphLog | BarLog | TextLog
 --
--- Buffer definition
--- 
--- | Ring Buffer type
---
-
---
 -- UI Attribute Map
 --
-normalAttr , errorAttr , alertAttr , pgcompAttr , pgtodoAttr , espeedAttr
- , thpotAttr , msensAttr , batvAttr , mnotselectedAttr , mselectedAttr :: AttrName
-normalAttr = attrName "normalAttr"
+normalAttr = attrName "normalAttr"                  :: AttrName
 errorAttr  = attrName "errorAttr"                   :: AttrName
 alertAttr  = attrName "alertAttr"                   :: AttrName
 pgcompAttr = attrName "progressComplete"            :: AttrName
@@ -110,14 +97,14 @@ alphabets = (['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q
 drawInitialScreen :: String -- ^ current version
                   -> String -- ^ compiled date
                   -> Widget Name
-drawInitialScreen v d =  
+drawInitialScreen currentVersion compiledOn =  
       str   "    \\              '             `"
   <=> str   "     .              .             `     ,_ .`"
   <=> str   "--_,   ,            |              /  /`. +'.'"
   <=> str   "+ + \". .===========================w. || = =  "
   <=> str   "= = :|V-Monitor for Rover Mini MEMS-\\\\ \\.+_+.'"
   <=> str   "- -,\"|:--------- ------------ -------:|     |"
-  <=> str ( ( take 37 ( " .   \\\\-Version " ++ v ++ " on " ++ d )) ++ "-//   .  ." )
+  <=> str ( ( take 37 ( " .   \\\\-Version " ++ currentVersion ++ " on " ++ compiledOn )) ++ "-//   .  ." )
   <=> str   "`.`  .^.== +--------------------+ == .`.'.` ,"
   <=> str   "-----| |-- |  by Kentaro UONO   |----| |-''' "
   <=> str   "````  '    +--------------------+     '"
@@ -173,7 +160,7 @@ drawTime s = withAttr ( if odd' s then mselectedAttr else mnotselectedAttr ) $ t
   where 
     sec (LocalTime _ t') = truncate $ todSec t'
     time = fst . evnt . rdat
-    odd' = odd . fromIntegral . sec . time
+    odd' = odd . sec . time
     tstr = str . take 22 . show . time
 --
 draw807dData :: Status -> Widget Name
