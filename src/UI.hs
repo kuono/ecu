@@ -1,56 +1,71 @@
 {- |
 Module      : UI
 Description : Text User Interface Library for Rover Mini ECU Monitor
-Copyright   : (c) Kentaro UONO, 2019
-License     : N/A
+Copyright   : (c) Kentaro UONO, 2019-2021
+License     : MIT Licence
 Maintainer  : info@kuono.net
 Stability   : experimental
 Portability : macOS X
 -}
-
+-- {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
 module UI where
 
 import Lib
 import qualified ECU
--- import Control.Monad
--- import Control.Monad.IO.Class
-import Control.Monad.STM
-import Control.Monad.Trans.Writer
-import Control.Monad.Trans.Reader 
-import Control.Monad.Trans.Class
-import Control.Concurrent
--- import Control.Concurrent.STM.TChan
--- import qualified Control.Exception as Ex
--- import qualified Data.ByteString   as BS
 import Data.Time.LocalTime
 import Text.Printf
-
 import Brick
-import Brick.BChan (newBChan, writeBChan)
 import qualified Brick.Widgets.Border as B
+import qualified Brick.Widgets.Edit as E
+import qualified Brick.Widgets.Center as C
 import qualified Brick.Widgets.Border.Style as BS
 import qualified Brick.Widgets.ProgressBar as BP
-import qualified Brick.Widgets.Center as C
+import Brick.Forms
+-- import qualified Data.Text as T
+-- import Control.Lens.TH
 import qualified Graphics.Vty as V
 import Graphics.Vty
 import Brick.BorderMap
--- import Data.Sequence (Seq)
--- import qualified Data.Sequence as S
-import TextPlot (PlotConfig(..),ParamFunction(..),PlotFunction,(.+),(.|),(.-),
-                 PlotColour(..),Line,Cell,
-                 plotStrWithConfig,plotCellWithConfig,emptyXYPlot,)
--- import Linear.V2 (V2(..))
-import Lens.Micro ((^.))   
+import TextPlot ( PlotConfig(..) , PlotFunction
+                --, ParamFunction(..), PlotColour(..) 
+                , (.+),(.|),(.-)
+                , plotStrWithConfig
+                , emptyXYPlot
+                -- , Line, Cell ,plotCellWithConfig,
+                )
+import Lens.Micro ((^.))
 --
+maxGraphLength :: Int  -- ^ Graph Plot Area width limitation
 maxGraphLength = 20
+-- dset:: V.Vector ECU.EvContents
+-- dset = V.singleton ECU.OffLined
 -- 
 -- UI Name space
 -- 
 data Display = Dialog | DataPanel | CurrentStatus | CurrentData | GraphLog | BarLog | TextLog
 --
+-- Graph related definitions
+-- 
+-- | Drawing instruction
+type Point = (Int,Int) -- ^ (x,y) x = 0..100, y = 0..100 
+data Instruction
+  = Point              -- ^ Point
+  | Line Point Point   -- ^ Line from Point 1 to Point 2
+  | End
+--
+type Canvas = [[(Int, Colour)]]
+data Colour = Red | Yellow | Blue
+--
+-- | drawing function
+plotGraph :: Canvas -> [Instruction] -> Canvas
+plotGraph = undefined
+--
 -- UI Attribute Map
 --
-normalAttr = attrName "normalAttr"                  :: AttrName
+normalAttr , errorAttr , alertAttr , pgcompAttr , pgtodoAttr , espeedAttr
+ , thpotAttr , msensAttr , batvAttr , mnotselectedAttr , mselectedAttr :: AttrName
+normalAttr = attrName "normalAttr"
 errorAttr  = attrName "errorAttr"                   :: AttrName
 alertAttr  = attrName "alertAttr"                   :: AttrName
 pgcompAttr = attrName "progressComplete"            :: AttrName
@@ -75,36 +90,61 @@ theMap = attrMap V.defAttr
     , (batvAttr,   fg V.blue)
     , (mnotselectedAttr, V.white `on` V.black )
     , (mselectedAttr,    V.black `on` V.white )
+    , (E.editAttr, V.white `on` V.black)
+    , (E.editFocusedAttr, V.black `on` V.yellow)
+    , (invalidFormInputAttr, V.white `on` V.red)
+    , (focusedFormInputAttr, V.black `on` V.yellow)
     ]
+--
+-- Form for default Data and function
+--
+-- | types for user information on Form Dialog 
+-- data UserInfo = 
+--   FormState { _portAddress    :: T.Text     -- ^ USB - シリアルコネクタを接続したポート名
+--             , _logFolderPath  :: T.Text   -- ^ ログファイルを格納する場所の名前
+--             , _logNameRule    :: T.Text     -- ^ ログファイルの名前の生成規則
+--             } deriving (Show)
 
+-- makeLenses ''UserInfo
+
+-- | make User Information input form
+-- mkUIForm :: UserInfo -> Form UserInfo e Name
+-- mkUIForm =  
+--   let label s w = padBottom (Pad 1) $ (vLimit 1 $ hLimit 15 $ str s <+> fill ' ') <+> w
+--   in  newForm
+--         [ label "Port Path     :" @@= editTextField portAddress PortAddressField (Just 1)
+--         , label "Forder Path   :" @@= editTextField logFolderPath LogFolderPathField (Just 1) 
+--         , label "Log File Name :" @@= editTextField logNameRule LogNameRuleField (Just 1)
+--         ]
+--
 -- Draw functions
 --
-numbers :: ([Char], [[[Char]]])
-numbers = (['0','1','1','2','3','4','5','6','7','8','9',',','.'],
-   [["****","   *","****","****","*  *","****","****","****","****","****","    ","    "],
-    ["*  *","   *","   *","   *","*  *","*   ","*   ","   *","*  *","*  *","    ","    "],
-    ["*  *","   *"," ** ","****","****","****","****","   *","****","****","    ","    "],
-    ["*  *","   *","**  ","   *","   *","   *","*  *","   *","*  *","   *","   *","    "],
-    ["****","   *","****","****","   *","****","****","   *","****","   *","  * ","  **"]]) 
-alphabets :: ([Char], [[[Char]]])
-alphabets = (['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'],
-  [["****","*   ","****","   *","****","****","****","*  *","*** ","  * ","*  *","*   ","* **","    ","    ","****","    ","****"," ***","****","*  *","    ","    ","   ","*  *","****"],
-   ["   *","*   ","*   ","   *","*   ","*   ","*  *","*  *"," *  ","  * ","* * ","*   ","****","    ","    ","*  *","****","*  *","*   ","  * ","*  *","    ","    ","   ","*  *","  * "],
-   ["****","****","*   ","****","****","****","****","****"," *  ","  * ","**  ","*   ","* **","****","****","****","*  *","****","****","  * ","*  *","*  *","* **","* *","****"," *  "],
-   ["*  *","*  *","*   ","*  *","*   ","*   ","   *","*  *"," *  ","  * ","* * ","*   ","* **","*  *","*  *","*   ","****","* * ","   *","  * ","*  *"," * *","* **"," * ","  * ","*   "],
-   ["****","****","****","****","****","*   ","****","*  *","*** ","*** ","*  *","****","* **","*  *","****","*   ","   *","*  *","*** ","  * "," ** ","  * ","****","* *","  * ","****"]])
+-- numbers :: ([Char], [[[Char]]])
+-- numbers = (['0','1','1','2','3','4','5','6','7','8','9',',','.'],
+--    [["****","   *","****","****","*  *","****","****","****","****","****","    ","    "],
+--     ["*  *","   *","   *","   *","*  *","*   ","*   ","   *","*  *","*  *","    ","    "],
+--     ["*  *","   *"," ** ","****","****","****","****","   *","****","****","    ","    "],
+--     ["*  *","   *","**  ","   *","   *","   *","*  *","   *","*  *","   *","   *","    "],
+--     ["****","   *","****","****","   *","****","****","   *","****","   *","  * ","  **"]]) 
+-- alphabets :: ([Char], [[[Char]]])
+-- alphabets = (['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'],
+--   [["****","*   ","****","   *","****","****","****","*  *","*** ","  * ","*  *","*   ","* **","    ","    ","****","    ","****"," ***","****","*  *","    ","    ","   ","*  *","****"],
+--    ["   *","*   ","*   ","   *","*   ","*   ","*  *","*  *"," *  ","  * ","* * ","*   ","****","    ","    ","*  *","****","*  *","*   ","  * ","*  *","    ","    ","   ","*  *","  * "],
+--    ["****","****","*   ","****","****","****","****","****"," *  ","  * ","**  ","*   ","* **","****","****","****","*  *","****","****","  * ","*  *","*  *","* **","* *","****"," *  "],
+--    ["*  *","*  *","*   ","*  *","*   ","*   ","   *","*  *"," *  ","  * ","* * ","*   ","* **","*  *","*  *","*   ","****","* * ","   *","  * ","*  *"," * *","* **"," * ","  * ","*   "],
+--    ["****","****","****","****","****","*   ","****","*  *","*** ","*** ","*  *","****","* **","*  *","****","*   ","   *","*  *","*** ","  * "," ** ","  * ","****","* *","  * ","****"]])
 --
 drawInitialScreen :: String -- ^ current version
                   -> String -- ^ compiled date
                   -> Widget Name
-drawInitialScreen currentVersion compiledOn =  
+drawInitialScreen v d =
       str   "    \\              '             `"
   <=> str   "     .              .             `     ,_ .`"
   <=> str   "--_,   ,            |              /  /`. +'.'"
   <=> str   "+ + \". .===========================w. || = =  "
   <=> str   "= = :|V-Monitor for Rover Mini MEMS-\\\\ \\.+_+.'"
   <=> str   "- -,\"|:--------- ------------ -------:|     |"
-  <=> str ( ( take 37 ( " .   \\\\-Version " ++ currentVersion ++ " on " ++ compiledOn )) ++ "-//   .  ." )
+  <=> str ( ( take 37 ( " .   \\\\-Version " ++ v ++ " on " ++ d )) ++ "-//   .  ." )
   <=> str   "`.`  .^.== +--------------------+ == .`.'.` ,"
   <=> str   "-----| |-- |  by Kentaro UONO   |----| |-''' "
   <=> str   "````  '    +--------------------+     '"
@@ -117,16 +157,23 @@ drawPanes ecu =
     [ withBorderStyle BS.unicodeRounded $ B.borderWithLabel (str "Rover Mini MEMS Monitor") $
             vLimit 1
             ( drawEcuStatus ecu <+> drawTime ecu )
-        -- <=> ( customWidget "Test String" <+> myFill 'o' )
         <=> drawMenu ecu
+        <=> ( B.hBorderWithLabel (str "MENU")
+              -- <=> if inmenu ecu then
+              --       let defaultUserInformation = FormState "" "" ""
+              --       in C.vCenter $ C.hCenter $ renderForm $ mkUIForm defaultUserInformation
+              --     else
+              --       str ""
+              <=> B.hBorder
+        )
         <=> draw807dData ecu--  <+> B.vBorder
         <=> drawIACPos ecu
         <=> B.hBorderWithLabel ( str "Fault Status")
         <=> drawEcuFaultStatus ecu
         <=> B.hBorderWithLabel ( str "Note")
-        <=> drawEcuErrorContents ecu 
+        <=> drawEcuErrorContents ecu
         <=> drawNote ecu
-         
+
     ]
 --
 drawNote :: Status -> Widget Name
@@ -138,7 +185,7 @@ drawEcuStatus s = viewport StatusPane Horizontal $ hLimit 30 $
     ECU.PortNotFound f -> withAttr errorAttr  $ str (" Port Not Found :" ++ f ) <+> B.vBorder
     ECU.Connected _    -> withAttr normalAttr $ str (" Connected. " ++ (ECU.mname $ model s) ++ "(" ++ show (ECU.d8size $ model s) ++ "," ++ show (ECU.d7size $ model s) ++ ")") <+> B.vBorder
     ECU.OffLined       -> withAttr alertAttr  $ str " Off Line                      " <+> B.vBorder
-    ECU.Tick _         -> 
+    ECU.Tick _         ->
       withAttr  (if True then normalAttr else alertAttr)
        $ str (" Connected. " ++ (ECU.mname $ model s) ++ "(" ++ show (ECU.d8size $ model s) ++ "," ++ show (ECU.d7size $ model s) ++ ")") <+> B.vBorder
     ECU.GotIACPos _    -> withAttr normalAttr $ str (" Connected. " ++ (ECU.mname $ model s) ++ "(" ++ show (ECU.d8size $ model s) ++ "," ++ show (ECU.d7size $ model s) ++ ")") <+> B.vBorder
@@ -146,7 +193,7 @@ drawEcuStatus s = viewport StatusPane Horizontal $ hLimit 30 $
     _                  -> emptyWidget
 --
 drawEcuErrorContents :: Status -> Widget Name
-drawEcuErrorContents s = viewport ErrorContentsPane Horizontal $ 
+drawEcuErrorContents s = viewport ErrorContentsPane Horizontal $
     case event s of
       ECU.PortNotFound f -> withAttr errorAttr  $ str f
       ECU.Connected m    -> withAttr normalAttr $ str $ ECU.mname m
@@ -156,15 +203,15 @@ drawEcuErrorContents s = viewport ErrorContentsPane Horizontal $
       _                  -> emptyWidget
 --
 drawTime :: Status -> Widget Name
-drawTime s = withAttr ( if odd' s then mselectedAttr else mnotselectedAttr ) $ tstr s
-  where 
+drawTime s = withAttr ( if sodd s then mselectedAttr else mnotselectedAttr ) $ tstr s
+  where
     sec (LocalTime _ t') = truncate $ todSec t'
     time = fst . evnt . rdat
-    odd' = odd . sec . time
+    sodd = odd . fromIntegral . sec . time
     tstr = str . take 22 . show . time
 --
 draw807dData :: Status -> Widget Name
-draw807dData s = vLimit 21 $      B.hBorderWithLabel ( str "Data 80/7D" ) 
+draw807dData s = vLimit 21 $      B.hBorderWithLabel ( str "Data 80/7D" )
                               <=> ( hLimit 41 (drawData s) <+> B.vBorder <+> drawGraph' s )
 --  vLimit 21 $ case event s of
 --   ECU.PortNotFound p -> drawInitialScreen ver date-- hLimit 60 $ vBox [drawData s]
@@ -178,7 +225,7 @@ drawBar s = {- vLimit 19 $ hLimit 20 $ -} vBox [
     ECU.PortNotFound _ -> emptyWidget
     _                  -> -- ECU.OffLine or ECU.OnLine
       B.borderWithLabel (str "Graph") $ viewport GraphPane Vertical $
-            BP.progressBar Nothing (ratio 0    3500 ECU.engineSpeed s) 
+            BP.progressBar Nothing (ratio 0    3500 ECU.engineSpeed s)
         <=> BP.progressBar Nothing (ratio 0.0  4.0  ECU.throttlePot s)
         <=> BP.progressBar Nothing (ratio 0    130  ECU.mapSensor   s)
         <=> BP.progressBar Nothing (ratio 11.0 15.0 ECU.battVoltage s)
@@ -193,7 +240,7 @@ drawGraph s = viewport GraphPane Both $ str $ plotStrWithConfig config graph
     -- colour White = Lib.white
     -- colour Red   = Lib.red
     -- colour _     = Lib.blue
-    config = PlotConfig 
+    config = PlotConfig
         { c'width    = maxGraphLength -- 40
         , c'height   = 15
         , c'samples  = maxData  -- 60 defined in Lib
@@ -266,9 +313,9 @@ drawGraph' s = viewport GraphPane Both $
       <=> str ( graph 0    1000 ECU.lambda_voltage dsets)
       where
         dsets :: [DataSet]
-        dsets = rdat s : dset s 
+        dsets = rdat s : dset s
         graph :: (Real a) => a -> a -> (ECU.Frame -> a) -> [DataSet] -> String
-        graph mind maxd f = map ( hBarCh mind maxd f) 
+        graph mind maxd f = map ( hBarCh mind maxd f)
         hBarCh :: (Real a) => a -> a -> (ECU.Frame -> a )-> DataSet -> Char
         hBarCh mind maxd f ds = case snd $ evnt ds of
           ECU.Done _         -> 'G'
@@ -306,7 +353,7 @@ drawEcuFaultStatus s = case event s of
 --
 drawIACPos :: Status -> Widget Name
 drawIACPos s =  str $   "IAC Pos : " ++  show (lIacPos s)
-                  ++  ", ICool Temp : " ++  show (iCoolT s) 
+                  ++  ", ICool Temp : " ++  show (iCoolT s)
 
 --
 drawData :: Status -> Widget Name
@@ -318,7 +365,7 @@ drawData s = viewport DataPane Vertical $ case event s of
         <=>  ( str ( printf "     map Sensor (kPa) :     %3d   "  ( ECU.mapSensor   d' ) )   <+> hLimit 10 ( BP.progressBar Nothing (dratio 0 130 ECU.mapSensor)       ) )
         <=>  ( str ( printf "battery Voltage ( V ) :   %5.2f   "  ( ECU.battVoltage d' ) )   <+> hLimit 10 ( BP.progressBar Nothing (dratio 11.0 15.0 ECU.battVoltage) ) )
         <=>  ( ( case iCoolT s of
-                  Just t0 -> if coolantTemp > t0 + 1 then 
+                  Just t0 -> if coolantTemp > t0 + 1 then
                               withAttr normalAttr
                             else
                               withAttr alertAttr
@@ -326,7 +373,9 @@ drawData s = viewport DataPane Vertical $ case event s of
                ) $ str ( printf "   Coolant Temp (dgC) :     %3d   "  coolantTemp ) )
         <=>  str ( printf "   ambient Temp (dgC) :     %3d   "  ( ECU.ambientTemp d' ) )
         <=>  str ( printf "intake Air Temp (dgC) :     %3d   "  ( ECU.intakeATemp d' ) )
-        <=>  str ( printf " park or neutral? A/C?: %4s %02X "    ( parkorneutral ( ECU.pnClosed d' ) ) ( ECU.pnClosed d') ++ aconoff (ECU.pnClosed d')  )
+        <=>  if ECU.name ( model s )  == "MNE10078  M/SPI Japan Cooper"
+               then str ( printf " park or neutral      : %4s  %02X"  ( parkorneutral ( ECU.pnClosed d' ) ) ( ECU.pnClosed d') ++ aconoff (ECU.pnClosed d') )
+               else str ( printf " Cooler (MEMS 1.3J)   : %10s" (aconoff (ECU.pnClosed d')) )
         <=>  str ( printf "    idle switch       :      %02x "  ( ECU.idleByte d'    ) ) -- ( closedorclear (ECU.idleSwitch d' ) ) )
         <=>  str ( printf "idl Air Ctl M P(C/O)  :     %3d "    ( ECU.idleACMP d'   ) )
         <=>  str ( printf "idl Spd deviatn       :   %5d + "    ( ECU.idleSpdDev d' ) )
@@ -343,7 +392,7 @@ drawData s = viewport DataPane Vertical $ case event s of
 -- Prelude.putStrLn $ vt100mv 30 0  ++ "----------------- Log -------------------------"
 -- mapM_ (Prelude.putStrLn . take 40 ) (if length logs >= 4 then take 4 logs else logs)
 -- Prelude.putStrLn $ vt100mv 36 0  ++ "-----------------------------------------------" ++ vt100mv 3 0
-       where  
+       where
           d' = ECU.parse $ case event s of
                   ECU.Tick r -> r
                   _          -> ECU.emptyData807d
@@ -356,12 +405,12 @@ drawData s = viewport DataPane Vertical $ case event s of
           aconoff       d = if d == 0 then {- bblue ++ yellow ++ -}   " a/c on   " {- ++ reset -}
                                       else {- bgreen ++ yellow ++ -}  " a/c off  " {- ++ reset -}
           richorlean::Int -> String
-          richorlean v   = if v >= 450 then {- bred ++ green  ++ -}   " rich     " {- ++ reset -} 
+          richorlean v   = if v >= 450 then {- bred ++ green  ++ -}   " rich     " {- ++ reset -}
                                        else {- bgreen ++ yellow ++ -} " lean     " {- ++ reset -}
           openorclosed::Int -> String
           openorclosed d = if d == 0   then {- bred ++ green  ++ -}   "Crl wt FDt" {- ++ reset -}
                                        else {- bgreen ++ yellow ++ -} "Crl wt O2d" {- ++ reset -}
-          dratio:: (Real a) => a -> a -> (ECU.Frame -> a) -> Float 
+          dratio:: (Real a) => a -> a -> (ECU.Frame -> a) -> Float
           dratio llimit hlimit f = case (dt <= llimit,dt >= hlimit) of
               (True , _ )  -> 0.0
               (_ , True )  -> 1.0
@@ -371,7 +420,7 @@ drawData s = viewport DataPane Vertical $ case event s of
                           _          -> llimit
 --
 drawMenu :: Status -> Widget Name
-drawMenu s = 
+drawMenu s =
   if not (inmenu s)
     then emptyWidget
     else str $ menu s
