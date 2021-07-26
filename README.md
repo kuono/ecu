@@ -10,14 +10,23 @@ programmed by Kentaro UONO
 - 0.4.1.2  by K.Uono on 2019.07.05
 - 0.4.2.0  by K.Uono on 2019.07.06
 - 0.5.0    by K.Uono on 2019.08.03 UI ralated types and functions are now defined in UI module
-- 0.5.1    by K.Uono on 2019.08.03 Dot Graphized
 - 0.7.0    by K.Uono on 2019.08.14 Brick Version
 - 0.8.0    by K.Uono on 2019.09.07 ReaderT Version
-- 0.8.1    by K.Uono on 2019.09.11 Menu Items are added.
+- 0.9.0    by K.Uono on 2020.01.25
+- 0.9.2    by K.Uono on 2020.09.20
+- 0.9.3    by K.Uono on 2020.XX.XX added HTML treat function as UI driver
+- 0.11.0   by K.Uono on 2021.07.23 Fault Code bug fix
+- 0.11.1   by K.Uono on 2021.07.26 RaspberryOS adoption
 
 ## 基本的な使い方
 
-stack build --profile
+You need a VT100 terminal using Japanese font. 
+<!-- 画面出力に日本語フォントを使っているので，日本語対応の端末エミュレータが必要です。-->
+cabal update
+cabal build
+cabal run
+
+<!-- stack build --profile
 stack exec -- <bin_name> +RTS -p -hb
 stack exec -- hp2ps -e8in -c <proj_name>.hp
 　例　hp2ps -e8in -c ecu-exe.hp
@@ -25,8 +34,65 @@ stack exec -- hp2ps -e8in -c <proj_name>.hp
 
 stack run +RTS -p -hc
 stack test --profile --test-arguments "+RTS -hm" -- 引数の渡し方
-stack exec -- <bin_name> +RTS -p -hc
+stack exec -- <bin_name> +RTS -p -hc -->
 
+# 参考情報
+
+## 開発目標
+
+### 不明点
+- キーオンののち初回接続してしばらくしてエラーが出ると，まったくつながらない ←　いつの間にか繋がるようになった。ドライバのバグフィックスがあった？
+
+### わかっている問題点
+
+- プロファイリングすると盛大なメモリリークあり（ギガ単位のメモリ利用）。Vtyモジュールのせい？
+  - ただし少なくともCatalinaでモニタリングしている限りでは，数十Mバイト程度しかメモリは消費していない。
+  - Big Surでも同様。また，Rapsberian でも同様。
+
+### 近日対応したい機能
+
+- 既存ログのビューア機能
+- ヘルプキー（ESCキー）を押した時にダイアログ表示
+- ポート値などをGUIを使って入力できるようにする
+- 各種設定値（上下限値，平均値等）を表示
+- グラフ表示項目の選択ダイアログ・初期設定
+- 各センサー値に異常値が出た時に，異常記録を画面・ログ双方に残す
+- アイドリングセンサ値の常時表示　← 異常検知アルゴリズムをどうするか検討
+- Form Widget 実装開始。ただし，以下の問題がある：
+- フォームイベントを扱っていない
+- フォームが画面幅全体に出てしまっている
+- フォームイベントを扱う間の通常のイベントの扱いをどうするか決めていない
+- フォームまわりの宣言について，どのモジュールで扱えばいいのかよくわかっていない
+- TonaTona ライブラリを使用し始める予定
+- 設定ファイルに初期値を書き込んでおく（接続に成功したポート名くらい？）
+- UI として新たにHTML生成する機能を加える予定
+- モデルに，vector構造で保持するmutableな直近データを加える予定
+- Status の dset :: [DataSet] を vector に <- ガベージコレクションがあるので対応不要かも
+- 型定義や関数の置き場所を再度整理し，モジュールの独立性を高める予定
+
+
+### 保留とする開発予定項目
+
+- conduit ライブラリを導入 <- 手段が目的になっている？
+
+### 追加したい機能/解決したい問題点/課題
+
+-- #   ThreePennyGUI を使い，現場で手持ちの iPhone や iPad からデータをリアルタイムで見られるようにする
+-- #   ゲージUIを組み込む
+-- #   Raspberry Pi への稼働移行（タッチスクリーン・車載用ケース手配）
+-- #   cef3を組み込み，GUIを内在化
+-- #   CUIとGUIを選べるようにする
+-- #   - 最大値・最小値を，直近10秒程度の範囲に変更する？
+
+### いつ対応したかは忘れたが，解決済みのもの・無意味となったもの
+
+-- #   ECUが停止した後QUITをするとhCloseが二回呼ばれ、例外が発生している。
+-- #   キャラクタグラフのベースラインが移動する問題の原因究明。
+-- #   parse関数で-- ２バイトデータを無視しているので注意
+-- #   ReaderT, StateT モナド導入
+-- #   - FRP化する
+
+以下の情報は，本プログラムを作成する上で参考にしたデータや覚書です。
 
 ## ECUのデータについて
 
@@ -41,7 +107,7 @@ Battery Voltage ( V ) : 蓄電池電圧
 Coolant Temp (dgC)    : 冷却液温度
 Ambient Temp (dgC)    : 環境温度
 Intake Air Temp (dgC) : 吸気温度
-Park or neutral? A/C? : AT車のインヒビタースイッチ（92はエアコン）
+Park or neutral? A/C? : AT車のインヒビタースイッチ（92年式マニュアル車はエアコンのon/off状態のようです）
 Idle switch           : アイドルスイッチ
 Idl Air Ctl M P(C/O)  :
 Idl Spd deviatn       :
@@ -52,7 +118,6 @@ Closed/open loop      :
 Fuel trim ( % )       : フューエルトリム
 Unknown 80 data (0B 0F 10 11 15 19 1A 1B)
 フォールトコード
-
 
 ### MiniMoniの表示画面の意味
 
@@ -99,6 +164,19 @@ data Frame80  = Frame80 {
         unknown1A   :: Word8,-- 0x1A	Unknown
         unknown1B   :: Word8 -- 0x1B	Unknown
     } deriving Show
+
+#### フォールトコードの意味
+
+- [こちら](https://minkara.carview.co.jp/userid/2834887/car/2442400/4981106/6/note.aspx#title)参照
+- Status byte 1 (0x0d)
+-- Bit 0 : Coolant Temp Sensor Error
+-- Bit 1 : Inlet Air Temp Sensor Error
+-- Bit 4 : Ambient Air Temp Sensor Error (But not installed on Mini)
+-- Bit 5 : Fuel Temp Sensor Error (But not installed on Mini)
+- Status byte 2 (0x0e)
+-- Bit 1 : Fuel pump cirkit Error
+-- Bit 5 : ECU Vaccum Sensor Error
+-- Bit 7 : T-Pot cirkit Error
 
 ### 各種センサーの役割や信号の意味
 
@@ -229,10 +307,13 @@ low resistance = rich condition, high resistance = lean condition
 
     -- https://blogs.yahoo.co.jp/dmxbd452/5751726.html
     -- http://www.minispares.com/product/Classic/MNE101070.aspx
+    -- https://memsfcr.co.uk/ecu-versions/
     -- Part number	Manual / Automatic	Attributes	              VIN No. From - VIN No. To 
-    -- MNE10026	 Automatic	SPI -         Except Cooper	 	              - 59844
+    -- MNE10026	 Automatic	SPI -         Except Cooper	                  - 59844
     -- MNE10027	 Manual    	SPI - Japan - Except Cooper	                  - 60487
-    -- MNE10097	 Manual	    SPI -         Except Cooper - 1992-93	 	  - 59586
+    -- MNE10078  Manual     SPI - Japan - Cooper                          - 60487
+    -- MNE10097	 Manual	    SPI -         Except Cooper - 1992-93	 	  - 059586
+    --                                    Except Cooper                   - 059586
     -- MNE10090	 Automatic	SPI -         Except Cooper	            59845	68084
     -- MNE101060 Automatic	SPI -         Except Cooper	            68085	103112
     -- MNE10092	 Manual	    SPI -         Cooper	                60488	69492
@@ -241,6 +322,10 @@ low resistance = rich condition, high resistance = lean condition
     -- MNE101150 Manual	    SPI -         Except Cooper	           103113	134454
     -- MNE101160 Automatic	SPI -         Except Cooper     	   103113	134454
 
+    -- MNE10078  Cooper to 060487 JAPAN SPEC <- http://www.minispares.com/product/Classic/Electrics/MNE10078.aspx?09&ReturnUrl=/search/classic/MNE10078.aspx|Back%20to%20search ->
+    -- MNE101070 Cooper Nov93 on 69493 <- http://www.minispares.com/product/Classic/Electrics/MNE101070.aspx?09&ReturnUrl=/search/classic/MNE.aspx|Back%20to%20search ->
+    -- MNE101350 JAPAN SPEC 134455 ON <- http://www.minispares.com/product/Classic/Electrics/MNE101350.aspx?09&ReturnUrl=/search/classic/MNE.aspx|Back%20to%20search ->
+    -- MNE101361 Automatic  SPI with Air Con <- http://www.minispares.com/product/Classic/Electrics/Ignition/MNE101361.aspx?0908&ReturnUrl=/search/classic/MNE.aspx|Back%20to%20search ->
     -- MNE101350 Manual	    SPI - Except UK - 1996 on	134455 - 	 
     -- MNE101351 Manual	    SPI - Except UK - 1996 on	134455 - 
     -- MNE101360 Automatic	SPI - Except UK - 1996 on	134455 - 	 
