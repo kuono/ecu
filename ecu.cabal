@@ -1,20 +1,20 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.31.2.
+-- This file has been generated from package.yaml by hpack version 0.33.0.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: dbace1adca268d2813d475c501ceaf0ab7b25bdf679776e3352581a0e1c7a33d
+-- hash: a5e75bd7493d8ae657e65e63a832298312024f7226845d8e96738bd4f689095d
 
 name:           ecu
-version:        0.9.0
+version:        0.11.0
 description:    Please see the README on GitHub at <https://github.com/githubuser/ecu#readme>
 homepage:       https://github.com/kuono/ecu#readme
 bug-reports:    https://github.com/kuono/ecu/issues
 author:         Kentaro UONO
 maintainer:     info@kuono.net
-copyright:      2018-2020 Kentaro UONO
-license:        BSD3
+copyright:      2018-2021 Kentaro UONO
+license:        MIT
 license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
@@ -29,6 +29,7 @@ library
   exposed-modules:
       ECU
       Lib
+      MEMSControl
       TextPlot
       UI
   other-modules:
@@ -44,13 +45,15 @@ library
     , containers
     , directory
     , disk-free-space
+    , lenses
     , linear
     , microlens
     , random
     , serialport
     , split
     , stm
-    , textPlot
+    , text
+--    , textPlot
     , time
     , transformers
     , unix
@@ -63,13 +66,14 @@ executable ecu-exe
   other-modules:
       ECU
       Lib
+      MEMSControl
       TextPlot
       UI
       Paths_ecu
   hs-source-dirs:
       app
       src
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
+  ghc-options: -threaded -Wall -rtsopts
   build-depends:
       array
     , base >=4.7 && <5
@@ -79,13 +83,14 @@ executable ecu-exe
     , containers
     , directory
     , disk-free-space
-    , ecu
+    , lenses
     , linear
     , microlens
     , random
     , serialport
     , split
     , stm
+    , text
     , textPlot
     , time
     , transformers
@@ -98,10 +103,17 @@ test-suite ecu-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      MEMS
+      ECU
+      Lib
+      MEMSControl
+      TextPlot
+      UI
       Paths_ecu
   hs-source-dirs:
       test
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+      src
+  ghc-options: -threaded -rtsopts
   build-depends:
       array
     , base >=4.7 && <5
@@ -111,13 +123,14 @@ test-suite ecu-test
     , containers
     , directory
     , disk-free-space
-    , ecu
+    , lenses
     , linear
     , microlens
     , random
     , serialport
     , split
     , stm
+    , text
     , textPlot
     , time
     , transformers
