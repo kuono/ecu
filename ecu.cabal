@@ -7,7 +7,7 @@ cabal-version: 1.12
 -- hash: a5e75bd7493d8ae657e65e63a832298312024f7226845d8e96738bd4f689095d
 
 name:           ecu
-version:        0.11.0
+version:        0.11.1
 description:    Please see the README on GitHub at <https://github.com/githubuser/ecu#readme>
 homepage:       https://github.com/kuono/ecu#readme
 bug-reports:    https://github.com/kuono/ecu/issues
