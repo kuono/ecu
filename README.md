@@ -6,17 +6,19 @@ programmed by Kentaro UONO
 
 ## Version history
 
-- 0.10     by K.Uono on 2017.11.19
-- 0.4.1.2  by K.Uono on 2019.07.05
-- 0.4.2.0  by K.Uono on 2019.07.06
-- 0.5.0    by K.Uono on 2019.08.03 UI ralated types and functions are now defined in UI module
-- 0.7.0    by K.Uono on 2019.08.14 Brick Version
-- 0.8.0    by K.Uono on 2019.09.07 ReaderT Version
-- 0.9.0    by K.Uono on 2020.01.25
-- 0.9.2    by K.Uono on 2020.09.20
-- 0.9.3    by K.Uono on 2020.XX.XX added HTML treat function as UI driver
+- 0.12.0   by K.UONO on 2021.08.01 Dhall and configration file system 
+- 0.11.2   by K.Uono on 2021.07.28 Adoption for low Display raw number 
+- 0.11.1   by K.Uono on 2021.07.26 RaspberryPi OS adoption
 - 0.11.0   by K.Uono on 2021.07.23 Fault Code bug fix
-- 0.11.1   by K.Uono on 2021.07.26 RaspberryOS adoption
+- 0.10     by K.Uono on 2017.11.19
+- 0.9.3    by K.Uono on 2020.XX.XX added HTML treat function as UI driver
+- 0.9.2    by K.Uono on 2020.09.20
+- 0.9.0    by K.Uono on 2020.01.25
+- 0.8.0    by K.Uono on 2019.09.07 ReaderT Version
+- 0.7.0    by K.Uono on 2019.08.14 Brick Version
+- 0.5.0    by K.Uono on 2019.08.03 UI ralated types and functions are now defined in UI module
+- 0.4.2.0  by K.Uono on 2019.07.06
+- 0.4.1.2  by K.Uono on 2019.07.05
 
 ## 基本的な使い方
 
@@ -45,9 +47,11 @@ stack exec -- <bin_name> +RTS -p -hc -->
 
 ### わかっている問題点
 
+- Raspberry Pi 上で動作させると，テキスト端末エミュレーションソフトの解像度の関係で画面が入りきらない。
+  - [参考画像をここにいれる](./)
 - プロファイリングすると盛大なメモリリークあり（ギガ単位のメモリ利用）。Vtyモジュールのせい？
   - ただし少なくともCatalinaでモニタリングしている限りでは，数十Mバイト程度しかメモリは消費していない。
-  - Big Surでも同様。また，Rapsberian でも同様。
+  - Big Surでも同様。また，Rapsberian でも同様。リソースモニタで見ていると，数１００MBくらいしか消費していないのでは。
 
 ### 近日対応したい機能
 
@@ -145,6 +149,7 @@ data Frame80  = Frame80 {
         battVoltage :: Float , -- 0x08	Battery voltage, 0.1V per LSB (e.g. 0x7B == 12.3V)
         throttlePot :: Float , -- 0x09	Throttle pot voltage, 0.02V per LSB. WOT should probably be close to 0xFA or 5.0V.
         idleSwitch  :: Bool ,-- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
+        *** It seems that Bit 0 will be set in spite of Bit 4 in case of MEMS 1.3J, at least. 31st Jusy 2021 by K.UONO ***
         unknown0B   :: Word8,-- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
         pnClosed    :: Bool ,-- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
         -- Fault codes. On the Mini SPi, only two bits in this location are checked:             

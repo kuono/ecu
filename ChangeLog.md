@@ -1,4 +1,4 @@
-# Changelog for MyEcu
+# Change log for ECU Monitor for Rover MEMS 1.3 and 1.6 by K.Uono
 
 ## Unreleased changes
 
@@ -14,13 +14,21 @@
 
 ## Change history
 
-## 0.11.1
+### 0.12.0
+2021.07.30 v.0.12.0
+- DHall 導入。config ファイルの導入
+
+### 0.11.2
+2021.07.28 v.0.11.2
+- AppStatus にOSの違いを表す欄を追加。RaspberryPi OS と小さなモニタセットでの行数の少なさに対応
+
+### 0.11.1
 2021.07.26 v.0.11.1
 - RaspberryPi OS への対応
   - ecu.cabalの修正 ... 1) RTSオプション 全部削除, 2) 
   - README.mdの修正 ... 日本語フォントが必須であることの追記
 
-## 0.11.0
+### 0.11.0
 2021.07.20 v.0.11.0
 - ひょっとして TestBits でうまくエラーコードを検出できていない？→ 多分治った v.0.11.0
 - エラーコード表示周りのバグ修正　：　testBit の使い方が間違っていた。
