@@ -1,36 +1,37 @@
 {- |
-Module      : Lib
-Description : Ecu Communication Library for Rover Mini
-Copyright   : (c) Kentaro UONO, 2018-2021
-License     : MIT Licence
-Maintainer  : info@kuono.net
-Stability   : experimental
-Portability : macOS X
+* Module      : Lib
+* Description : Ecu Communication Library for Rover Mini which includes common functions
+* Copyright   : (c) Kentaro UONO, 2018-2021
+* License     : MIT Licence
+* Maintainer  : info@kuono.net
+* Stability   : experimental
+* Portability : macOS Big Sur and RaspberyPi OS buster
 -}
-
+{-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Lib where 
 
+import qualified Brick.BChan as BC
 import Control.Concurrent.STM.TChan
 import qualified Control.Exception as Ex
 import Control.Monad
 import Control.Monad.STM
-import qualified Brick.BChan as BC
 -- import qualified Brick.Forms as BF
 -- import qualified Data.Vector.Mutable as VM
-
+import Data.Fixed
+import Data.Time.LocalTime
+import Data.Time.Clock
+import Dhall
 import qualified ECU
 import System.IO -- for stdin, Buffering Mode
 import System.Directory
 import System.Environment
-import Data.Time.LocalTime
-import Data.Time.Clock
 import Text.Printf
-import Data.Fixed
 --
 ver   :: String
-ver   = "0.11.1"
+ver   = "0.12.0"
 date  :: String
-date  = "2021.07.25"
+date  = "2021.07.30"
 
 --
 -- # User Input Form related
@@ -51,26 +52,36 @@ data DataSet = DataSet -- time :: LocalTime, stat :: ECU.Status, edat :: ECU.Fra
   , note :: !String
   }
 
--- data DataBuffer s = DataBuffer 
---     { container :: VM.MVector s DataSet
---     , len :: Int
---     , pos :: Int
---     , hd  :: Int
---     , ed  :: Int
---     }
+--
+-- | Enviroment
+data Env = MacOS | RaspberryPiOS | UnsupportedOS deriving Eq
+-- | App Status definition
+
+-- Dhall example
+-- data Example = Example { foo :: Natural, bar :: Vector Double }
+--     deriving (Generic, Show)
+
+instance FromDhall Config
+-- instance FromDhall OS
+data Config = Config
+    { usbDeviceFilePath :: String
+--    , osEnvironment     :: Generic OS
+    } deriving (Generic,Show)
 data Status = Status
-    { testmode :: !Bool     -- ^ testmode : memsを接続しないで試す
-    , model    :: !ECU.ModelDataSet -- ^ ECU.ModelDataSet { name :: !String, d8size :: !Int, d7size :: !Int} deriving Eq
-    , rdat     :: !DataSet  -- ^ rdat  : 直近のデータセット（読出時刻，ECUの状態，ECUのバイナリデータ）
-    , dset     :: [DataSet] -- ^ dset  : 直前までのデータセット（最大 maxData個）
-    , echan    :: BC.BChan Event
-    , cchan    :: TChan ECU.UCommand
-    , lchan    :: TChan Event
-    , inmenu   :: !Bool
+    { testmode :: !Bool              -- ^ testmode : memsを接続しないで試す
+    , env      :: Env                -- ^ env    : 
+    , model    :: !ECU.ModelDataSet  -- ^ model  : 接続した ECU のモデル識別データ
+                                     --            ECU.ModelDataSet { name :: !String, d8size :: !Int, d7size :: !Int} deriving Eq
+    , rdat     :: !DataSet           -- ^ rdat   : 直近のデータセット（読出時刻，ECUの状態，ECUのバイナリデータ）
+    , dset     :: [DataSet]          -- ^ dset   : 直前までのデータセット（最大 maxData個）
+    , echan    :: BC.BChan Event     -- ^ echan  : Brickのイベントをやりとりするチャンネル
+    , cchan    :: TChan ECU.UCommand -- ^ cchan  : ECUにコマンドを送り込むチャンネル
+    , lchan    :: TChan Event        -- ^ lchan  : 
+    , inmenu   :: !Bool              -- ^ inmenu : 
     , menu     :: !Menu
-    , lIacPos  :: !(Maybe Int) -- ^ latest iac position
-    , iCoolT   :: !(Maybe Int) -- ^ initial coolant temperature
-    }
+    , lIacPos  :: !(Maybe Int)       -- ^ latest iac position
+    , iCoolT   :: !(Maybe Int)       -- ^ initial coolant temperature
+    } 
 -- GUI (Brick specific)
 data Name  = StatusPane | DataPane | GraphPane | NotePane | ErrorContentsPane
            | PortAddressField | LogFolderPathField | LogNameRuleField
@@ -159,7 +170,7 @@ coolanttemp = GraphItem { name = "Coolant Temp(\'C )",
   chr = 'C',pwr = 1, minl = -55, maxl = 120,  ul =98,   ll = -20}
 
 -- | デバイス名が指定されなかった場合に使うパス名　
-defaultUSBPathMac :: FilePath 
+defaultUSBPathMac         :: FilePath 
 defaultUSBPathMac         = "/dev/tty.usbserial-DO01OV70"
 defaultUSBPathRaspberryPi :: FilePath
 defaultUSBPathRaspberryPi = "/dev/ttyUSB0"
@@ -171,14 +182,15 @@ initialState (ech,cch,dch,tm) = do
   t <- currentTime
   a <- System.Environment.getArgs
   e <- System.Environment.getEnv "HOME"
-  let p = case a of
-            []    ->  if e == "/Users/kuono" then defaultUSBPathMac
-                                     else defaultUSBPathRaspberryPi
-            [opt] -> opt   
+  let ( p , e' ) = case a of
+            []    ->  if e == "/Users/kuono" then ( defaultUSBPathMac , MacOS )
+                                             else ( defaultUSBPathRaspberryPi , RaspberryPiOS )
+            [opt] -> ( opt , UnsupportedOS )   
             _     -> error "error: exactly one arguments needed."
   exist <- doesFileExist p
   return $ Status { 
       testmode = not exist || tm
+    , env      = e'
     , model    = snd ECU.mneUnknown
     , rdat     = DataSet {
           evnt = (t, if exist then ECU.OffLined else ECU.PortNotFound p)
@@ -196,8 +208,8 @@ initialState (ech,cch,dch,tm) = do
     , lchan = dch
     , inmenu = True
     , menu   = if exist then helpMenu else testMenu
-    , lIacPos = Nothing :: Maybe Int  -- ^ latest iac position
-    , iCoolT  = Nothing :: Maybe Int  -- ^ initial coolant temperature
+    , lIacPos = Nothing :: Maybe Int  -- latest iac position
+    , iCoolT  = Nothing :: Maybe Int  -- initial coolant temperature
     }
 --
 frametoTable :: ECU.Frame -> String
@@ -256,7 +268,7 @@ runlog ech = forever $ do
                 ECU.Tick r         -> frametoTable $ ECU.parse r
                 ECU.GotIACPos p    -> " Got IAC Pos    : " ++ show p
                 ECU.PortNotFound f -> " Port Not Found : " ++ f
-                ECU.Connected m    -> " Connected      : " ++ ECU.mname m
+                ECU.Connected m    -> " Connected      : " ++ ECU.name m
                 ECU.OffLined       -> " Off Lined. "
                 ECU.Done m         -> " Done           : " ++ show m
                 ECU.Error s        -> " Error          : " ++ s
@@ -302,7 +314,7 @@ getDummyStatus s = do
     -- , dset    = rdat s : dset s
     , iCoolT  = case iCoolT s of
                   Just _  -> iCoolT s
-                  Nothing -> Just $ ECU.coolantTemp f -- ^ initial coolant temperature
+                  Nothing -> Just $ ECU.coolantTemp f -- initial coolant temperature
     }
 
 currentTime :: IO LocalTime

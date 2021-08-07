@@ -1,11 +1,11 @@
 {- |
-Module      : UI
-Description : Text User Interface Library for Rover Mini ECU Monitor
-Copyright   : (c) Kentaro UONO, 2019-2021
-License     : MIT Licence
-Maintainer  : info@kuono.net
-Stability   : experimental
-Portability : macOS X
+* Module      : UI
+* Description : Text User Interface Library for Rover Mini ECU Monitor
+* Copyright   : (c) Kentaro UONO, 2019-2021
+* License     : MIT Licence
+* Maintainer  : info@kuono.net
+* Stability   : experimental
+* Portability : macOS Big Sur and RaspberyPi OS buster
 -}
 -- {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -18,22 +18,23 @@ import Text.Printf
 import Brick
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.Edit as E
-import qualified Brick.Widgets.Center as C
+-- import qualified Brick.Widgets.Center as C
 import qualified Brick.Widgets.Border.Style as BS
 import qualified Brick.Widgets.ProgressBar as BP
 import Brick.Forms
--- import qualified Data.Text as T
--- import Control.Lens.TH
+import Data.Bits
+-- import Data.Char
+import qualified Data.Text as T
 import qualified Graphics.Vty as V
 import Graphics.Vty
 import Brick.BorderMap
 import TextPlot ( PlotConfig(..) , PlotFunction
-                --, ParamFunction(..), PlotColour(..) 
-                , (.+),(.|),(.-)
-                , plotStrWithConfig
-                , emptyXYPlot
-                -- , Line, Cell ,plotCellWithConfig,
-                )
+    --, ParamFunction(..), PlotColour(..) 
+    , (.+),(.|),(.-)
+    , plotStrWithConfig
+    , emptyXYPlot
+    -- , Line, Cell ,plotCellWithConfig,
+    )
 import Lens.Micro ((^.))
 --
 maxGraphLength :: Int  -- ^ Graph Plot Area width limitation
@@ -50,9 +51,9 @@ data Display = Dialog | DataPanel | CurrentStatus | CurrentData | GraphLog | Bar
 -- | Drawing instruction
 type Point = (Int,Int) -- ^ (x,y) x = 0..100, y = 0..100 
 data Instruction
-  = Point              -- ^ Point
-  | Line Point Point   -- ^ Line from Point 1 to Point 2
-  | End
+    = Point              -- ^ Point
+    | Line Point Point   -- ^ Line from Point 1 to Point 2
+    | End
 --
 type Canvas = [[(Int, Colour)]]
 data Colour = Red | Yellow | Blue
@@ -65,9 +66,9 @@ plotGraph = undefined
 --
 normalAttr , errorAttr , alertAttr , pgcompAttr , pgtodoAttr , espeedAttr
  , thpotAttr , msensAttr , batvAttr , mnotselectedAttr , mselectedAttr :: AttrName
-normalAttr = attrName "normalAttr"
-errorAttr  = attrName "errorAttr"                   :: AttrName
-alertAttr  = attrName "alertAttr"                   :: AttrName
+normalAttr = attrName "normalAttr"                  :: AttrName  --  黒背景色に白字
+errorAttr  = attrName "errorAttr"                   :: AttrName  --  黄背景色に赤字
+alertAttr  = attrName "alertAttr"                   :: AttrName  --  赤字；Boldはよくわからない
 pgcompAttr = attrName "progressComplete"            :: AttrName
 pgtodoAttr = attrName "progressIncomplete"          :: AttrName
 espeedAttr = attrName "espeedAttr"                  :: AttrName
@@ -77,11 +78,12 @@ batvAttr   = attrName "batvAttr"                    :: AttrName
 mnotselectedAttr = attrName "menuisnotselectedAttr" :: AttrName
 mselectedAttr    = attrName "menuisselectedAttr"    :: AttrName
 --
+-- | Attribution map used in Brick system
 theMap :: AttrMap
 theMap = attrMap V.defAttr
-    [ (normalAttr, V.white `on` V.black)          -- ^ normalAttr : 黒背景色に白字
-    , (errorAttr,  V.red `on` V.yellow)           -- ^ errorAttr  : 黄背景色に赤字
-    , (alertAttr,  fg V.red `V.withStyle` V.bold) -- ^ alertAttr  : 赤字；Boldはよくわからない
+    [ (normalAttr, V.white `on` V.black)
+    , (errorAttr,  V.red `on` V.yellow)
+    , (alertAttr,  fg V.red `V.withStyle` V.bold)
     , (pgcompAttr, bg V.red)
     , (pgtodoAttr, bg V.white )
     , (espeedAttr, fg V.white)
@@ -99,11 +101,11 @@ theMap = attrMap V.defAttr
 -- Form for default Data and function
 --
 -- | types for user information on Form Dialog 
--- data UserInfo = 
---   FormState { _portAddress    :: T.Text     -- ^ USB - シリアルコネクタを接続したポート名
---             , _logFolderPath  :: T.Text   -- ^ ログファイルを格納する場所の名前
---             , _logNameRule    :: T.Text     -- ^ ログファイルの名前の生成規則
---             } deriving (Show)
+data UserInfo =
+  FormState { _portAddress    :: T.Text     -- ^ USB - シリアルコネクタを接続したポート名
+            , _logFolderPath  :: T.Text     -- ^ ログファイルを格納する場所の名前
+            , _logNameRule    :: T.Text     -- ^ ログファイルの名前の生成規則
+            } deriving (Show)
 
 -- makeLenses ''UserInfo
 
@@ -153,17 +155,13 @@ drawInitialScreen v d =
 -- Drawing
 --
 drawPanes :: Status -> [Widget Name]
-drawPanes ecu =
+drawPanes ecu
+  | env ecu  == MacOS =
     [ withBorderStyle BS.unicodeRounded $ B.borderWithLabel (str "Rover Mini MEMS Monitor") $
             vLimit 1
             ( drawEcuStatus ecu <+> drawTime ecu )
         <=> drawMenu ecu
         <=> ( B.hBorderWithLabel (str "MENU")
-              -- <=> if inmenu ecu then
-              --       let defaultUserInformation = FormState "" "" ""
-              --       in C.vCenter $ C.hCenter $ renderForm $ mkUIForm defaultUserInformation
-              --     else
-              --       str ""
               <=> B.hBorder
         )
         <=> draw807dData ecu--  <+> B.vBorder
@@ -173,8 +171,24 @@ drawPanes ecu =
         <=> B.hBorderWithLabel ( str "Note")
         <=> drawEcuErrorContents ecu
         <=> drawNote ecu
-
     ]
+  -- in case of raspberian os or others
+  | otherwise =
+    [ -- withBorderStyle BS.unicodeRounded $ B.borderWithLabel (str "Rover Mini MEMS Monitor") $
+            vLimit 1
+            ( drawEcuStatus ecu <+> drawTime ecu )
+        -- <=> drawMenu ecu
+        <=> B.hBorderWithLabel (str "MENU")
+            --  <=> B.hBorder
+        <=> draw807dData ecu--  <+> B.vBorder
+        <=> drawIACPos ecu
+        -- <=> B.hBorderWithLabel ( str "Fault Status")
+        <=> drawEcuFaultStatus ecu
+        -- <=> B.hBorderWithLabel ( str "Note")
+        <=> drawEcuErrorContents ecu
+        <=> drawNote ecu
+    ]
+
 --
 drawNote :: Status -> Widget Name
 drawNote s = str $ note $ rdat s
@@ -183,12 +197,12 @@ drawEcuStatus :: Status -> Widget Name
 drawEcuStatus s = viewport StatusPane Horizontal $ hLimit 30 $
   case event s of
     ECU.PortNotFound f -> withAttr errorAttr  $ str (" Port Not Found :" ++ f ) <+> B.vBorder
-    ECU.Connected _    -> withAttr normalAttr $ str (" Connected. " ++ (ECU.mname $ model s) ++ "(" ++ show (ECU.d8size $ model s) ++ "," ++ show (ECU.d7size $ model s) ++ ")") <+> B.vBorder
+    ECU.Connected _    -> withAttr normalAttr $ str (" Connected. " ++ (ECU.name $ model s) ++ "(" ++ show (ECU.d8size $ model s) ++ "," ++ show (ECU.d7size $ model s) ++ ")") <+> B.vBorder
     ECU.OffLined       -> withAttr alertAttr  $ str " Off Line                      " <+> B.vBorder
     ECU.Tick _         ->
       withAttr  (if True then normalAttr else alertAttr)
-       $ str (" Connected. " ++ (ECU.mname $ model s) ++ "(" ++ show (ECU.d8size $ model s) ++ "," ++ show (ECU.d7size $ model s) ++ ")") <+> B.vBorder
-    ECU.GotIACPos _    -> withAttr normalAttr $ str (" Connected. " ++ (ECU.mname $ model s) ++ "(" ++ show (ECU.d8size $ model s) ++ "," ++ show (ECU.d7size $ model s) ++ ")") <+> B.vBorder
+       $ str (" Connected. " ++ (ECU.name $ model s) ++ "(" ++ show (ECU.d8size $ model s) ++ "," ++ show (ECU.d7size $ model s) ++ ")") <+> B.vBorder
+    ECU.GotIACPos _    -> withAttr normalAttr $ str (" Connected. " ++ (ECU.name $ model s) ++ "(" ++ show (ECU.d8size $ model s) ++ "," ++ show (ECU.d7size $ model s) ++ ")") <+> B.vBorder
     ECU.Error m        -> withAttr errorAttr  $ str (" Error             : " ++ m ) <+> B.vBorder
     _                  -> emptyWidget
 --
@@ -196,7 +210,7 @@ drawEcuErrorContents :: Status -> Widget Name
 drawEcuErrorContents s = viewport ErrorContentsPane Horizontal $
     case event s of
       ECU.PortNotFound f -> withAttr errorAttr  $ str f
-      ECU.Connected m    -> withAttr normalAttr $ str $ ECU.mname m
+      ECU.Connected m    -> withAttr normalAttr $ str $ ECU.name m
       ECU.OffLined       -> withAttr errorAttr  $ str "     "
       ECU.Tick _         -> emptyWidget
       ECU.Error s'       -> withAttr errorAttr  $ str s'
@@ -205,9 +219,10 @@ drawEcuErrorContents s = viewport ErrorContentsPane Horizontal $
 drawTime :: Status -> Widget Name
 drawTime s = withAttr ( if sodd s then mselectedAttr else mnotselectedAttr ) $ tstr s
   where
+    sec :: LocalTime -> Int
     sec (LocalTime _ t') = truncate $ todSec t'
     time = fst . evnt . rdat
-    sodd = odd . fromIntegral . sec . time
+    sodd = odd . sec . time
     tstr = str . take 22 . show . time
 --
 draw807dData :: Status -> Widget Name
@@ -376,7 +391,8 @@ drawData s = viewport DataPane Vertical $ case event s of
         <=>  if ECU.name ( model s )  == "MNE10078  M/SPI Japan Cooper"
                then str ( printf " park or neutral      : %4s  %02X"  ( parkorneutral ( ECU.pnClosed d' ) ) ( ECU.pnClosed d') ++ aconoff (ECU.pnClosed d') )
                else str ( printf " Cooler (MEMS 1.3J)   : %10s" (aconoff (ECU.pnClosed d')) )
-        <=>  str ( printf "    idle switch       :      %02x "  ( ECU.idleByte d'    ) ) -- ( closedorclear (ECU.idleSwitch d' ) ) )
+        <=>  str ( printf "    idle switch       :    %04s " idleSwitch )
+               -- " ( ECU.idleByte d'    ) ) -- ( closedorclear (ECU.idleSwitch d' ) ) )
         <=>  str ( printf "idl Air Ctl M P(C/O)  :     %3d "    ( ECU.idleACMP d'   ) )
         <=>  str ( printf "idl Spd deviatn       :   %5d + "    ( ECU.idleSpdDev d' ) )
         <=>  str ( printf "ignition advnce (deg) :  %6.2f # "   ( ECU.ignitionAd d' ) )
@@ -389,6 +405,9 @@ drawData s = viewport DataPane Vertical $ case event s of
         <=>  str ( printf " %2x %2x %2x %2x %2x %2x %2x %2x" (ECU.unknown0B d') (ECU.unknown0F d') (ECU.unknown10 d') (ECU.unknown11 d') (ECU.unknown15 d') (ECU.unknown19 d') (ECU.unknown1A d') (ECU.unknown1B d') )
       where
         coolantTemp = ECU.coolantTemp d'
+        idleSwitch :: String
+        idleSwitch  = if testBit ( ECU.idleByte d' ) ( if model s == snd ECU.mne10078 then 1 else 4 )
+                          then "IDLE" else "T.ON" 
 -- Prelude.putStrLn $ vt100mv 30 0  ++ "----------------- Log -------------------------"
 -- mapM_ (Prelude.putStrLn . take 40 ) (if length logs >= 4 then take 4 logs else logs)
 -- Prelude.putStrLn $ vt100mv 36 0  ++ "-----------------------------------------------" ++ vt100mv 3 0
