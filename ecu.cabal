@@ -7,7 +7,7 @@ cabal-version: 1.12
 -- hash: a5e75bd7493d8ae657e65e63a832298312024f7226845d8e96738bd4f689095d
 
 name:           ecu
-version:        0.11.1
+version:        0.12.0
 description:    Please see the README on GitHub at <https://github.com/githubuser/ecu#readme>
 homepage:       https://github.com/kuono/ecu#readme
 bug-reports:    https://github.com/kuono/ecu/issues
@@ -43,9 +43,10 @@ library
     , bytestring
     , conduit
     , containers
+    , dhall
     , directory
     , disk-free-space
-    , lenses
+    , lens
     , linear
     , microlens
     , random
@@ -53,12 +54,12 @@ library
     , split
     , stm
     , text
---    , textPlot
     , time
     , transformers
     , unix
     , vector
     , vty
+--    , yaml
   default-language: Haskell2010
 
 executable ecu-exe
@@ -81,11 +82,13 @@ executable ecu-exe
     , bytestring
     , conduit
     , containers
+    , dhall
     , directory
     , disk-free-space
-    , lenses
+    , lens
     , linear
     , microlens
+    , process
     , random
     , serialport
     , split
@@ -121,6 +124,7 @@ test-suite ecu-test
     , bytestring
     , conduit
     , containers
+    , dhall
     , directory
     , disk-free-space
     , lenses
