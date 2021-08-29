@@ -1,11 +1,14 @@
-# ecu
+# Rover Mini MEMS Monitor
 
-Rover Mini MEMS Monitor
+## preface
 
-programmed by Kentaro UONO
+Copyright (c) 2019-2021 by Kentaro UONO
+
+Released under [the MIT license](https://opensource.org/licenses/mit-license.php)
 
 ## Version history
 
+- 0.12.1   by K.UONO on 2021.08.29 MEMS type was changed.
 - 0.12.0   by K.UONO on 2021.08.01 Dhall and configration file system 
 - 0.11.2   by K.Uono on 2021.07.28 Adoption for low Display raw number 
 - 0.11.1   by K.Uono on 2021.07.26 RaspberryPi OS adoption
@@ -20,13 +23,13 @@ programmed by Kentaro UONO
 - 0.4.2.0  by K.Uono on 2019.07.06
 - 0.4.1.2  by K.Uono on 2019.07.05
 
-## 基本的な使い方
+## Basic usage <!-- 基本的な使い方 -->
 
-You need a VT100 terminal using Japanese font. 
+You need a VT100 terminal because the App uses some Japanese fonts. 
 <!-- 画面出力に日本語フォントを使っているので，日本語対応の端末エミュレータが必要です。-->
-cabal update
-cabal build
-cabal run
+    cabal update
+    cabal build
+    cabal run
 
 <!-- stack build --profile
 stack exec -- <bin_name> +RTS -p -hb
@@ -38,11 +41,12 @@ stack run +RTS -p -hc
 stack test --profile --test-arguments "+RTS -hm" -- 引数の渡し方
 stack exec -- <bin_name> +RTS -p -hc -->
 
-# 参考情報
+## Development Related Memo
 
-## 開発目標
+### Development Objective
 
 ### 不明点
+
 - キーオンののち初回接続してしばらくしてエラーが出ると，まったくつながらない ←　いつの間にか繋がるようになった。ドライバのバグフィックスがあった？
 
 ### わかっている問題点
@@ -102,26 +106,26 @@ stack exec -- <bin_name> +RTS -p -hc -->
 
 ### 現在表示している内容
 
-ECUステータス（接続/断) ----------------------------------時刻
-ライブデータ------------------------------------------------
-Engine Speed (rpm)    : エンジン回転数
-Throttle Potent ( V ) : スロットル開度
-Map Sensor (kPa)      : MAPセンサ値
-Battery Voltage ( V ) : 蓄電池電圧
-Coolant Temp (dgC)    : 冷却液温度
-Ambient Temp (dgC)    : 環境温度
-Intake Air Temp (dgC) : 吸気温度
-Park or neutral? A/C? : AT車のインヒビタースイッチ（92年式マニュアル車はエアコンのon/off状態のようです）
-Idle switch           : アイドルスイッチ
-Idl Air Ctl M P(C/O)  :
-Idl Spd deviatn       :
-Ignition advnce (deg) : 進角
-Coil Time (msc)       : コイルタイム
-Lambda voltage ( mV)  : O2センサ電圧
-Closed/open loop      :
-Fuel trim ( % )       : フューエルトリム
-Unknown 80 data (0B 0F 10 11 15 19 1A 1B)
-フォールトコード
+- ECUステータス（接続/断) ----------------------------------時刻
+- ライブデータ------------------------------------------------
+- Engine Speed (rpm)    : エンジン回転数
+- Throttle Potent ( V ) : スロットル開度
+- Map Sensor (kPa)      : MAPセンサ値
+- Battery Voltage ( V ) : 蓄電池電圧
+- Coolant Temp (dgC)    : 冷却液温度
+- Ambient Temp (dgC)    : 環境温度
+- Intake Air Temp (dgC) : 吸気温度
+- Park or neutral? A/C? : AT車のインヒビタースイッチ（92年式マニュアル車はエアコンのon/off状態のようです）
+- Idle switch           : アイドルスイッチ
+- Idl Air Ctl M P(C/O)  :
+- Idl Spd deviatn       :
+- Ignition advnce (deg) : 進角
+- Coil Time (msc)       : コイルタイム
+- Lambda voltage ( mV)  : O2センサ電圧
+- Closed/open loop      :
+- Fuel trim ( % )       : フューエルトリム
+- Unknown 80 data (0B 0F 10 11 15 19 1A 1B)
+- フォールトコード
 
 ### MiniMoniの表示画面の意味
 
@@ -129,59 +133,66 @@ Unknown 80 data (0B 0F 10 11 15 19 1A 1B)
 
 - マルチ画面   0000 I C / 0.00V 0  : 原動機回転数 アイドリング認識 O2フィードバック / TPot電圧 TPotステップ値
 - 二次燃調面   SHORT FT / 100 % CL : Short Term Fuel Trim (%) 回路開閉（CL or OP？）
-- Fault Code の例
-01:Coolant 02:Crank NG
-01:T-Pot 02:ERROR 17 - 定番のエラー
-01:Air Temp 02:Map Sens 03:Crank NG
-01:Crank NG
-01:Air Temp 02:Map Sens
-
-### ECUから返ってくるデータの意味
-
-data Frame80  = Frame80 {
-        size_80     :: Int , -- 0x00	Size of data frame, including this byte. This should be 0x1C (28 bytes) for the frame described here.
-        engineSpeed :: Int , -- 0x01-2	Engine speed in RPM (16 bits)
-        coolantTemp :: Int , -- 0x03	Coolant temperature in degrees C with +55 offset and 8-bit wrap
-        ambientTemp :: Int , -- 0x04	Computed ambient temperature in degrees C with +55 offset and 8-bit wrap
-        intakeATemp :: Int , -- 0x05	Intake air temperature in degrees C with +55 offset and 8-bit wrap
-        fuelTemp    :: Int , -- 0x06	Fuel temperature in degrees C with +55 offset and 8-bit wrap. This is not supported on the Mini SPi, and always appears as 0xFF.
-        mapSensor   :: Int , -- 0x07	MAP sensor value in kilopascals
-        battVoltage :: Float , -- 0x08	Battery voltage, 0.1V per LSB (e.g. 0x7B == 12.3V)
-        throttlePot :: Float , -- 0x09	Throttle pot voltage, 0.02V per LSB. WOT should probably be close to 0xFA or 5.0V.
-        idleSwitch  :: Bool ,-- 0x0A	Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
-        *** It seems that Bit 0 will be set in spite of Bit 4 in case of MEMS 1.3J, at least. 31st Jusy 2021 by K.UONO ***
-        unknown0B   :: Word8,-- 0x0B	Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
-        pnClosed    :: Bool ,-- 0x0C	Park/neutral switch. Zero is closed, nonzero is open.
-        -- Fault codes. On the Mini SPi, only two bits in this location are checked:             
-        faultCode1  :: Bool ,-- 0x0D  * Bit 0: Coolant temp sensor fault (Code 1)
-        faultCode2  :: Bool ,--       * Bit 1: Inlet air temp sensor fault (Code 2)
-        faultCode10 :: Bool ,-- 0x0E  * Bit 1: Fuel pump circuit fault (Code 10)
-        faultCode16 :: Bool ,--       * Bit 7: Throttle pot circuit fault (Code 16)
-        unknown0F   :: Word8,-- 0x0F	Unknown
-        unknown10   :: Word8,-- 0x10	Unknown
-        unknown11   :: Word8,-- 0x11	Unknown
-        idleACMP    :: Int  ,-- 0x12	Idle air control motor position. On the Mini SPi's A-series engine, 0 is closed, and 180 is wide open.
-        idleSpdDev  :: Int  ,-- 0x13-14	Idle speed deviation (16 bits)
-        unknown15   :: Word8,-- 0x15	Unknown
-        ignitionAd  :: Float,-- 0x16	Ignition advance, 0.5 degrees per LSB with range of -24 deg (0x00) to 103.5 deg (0xFF)
-        coilTime    :: Float,-- 0x17-18	Coil time, 0.002 milliseconds per LSB (16 bits)
-        unknown19   :: Word8,-- 0x19	Unknown
-        unknown1A   :: Word8,-- 0x1A	Unknown
-        unknown1B   :: Word8 -- 0x1B	Unknown
-    } deriving Show
 
 #### フォールトコードの意味
 
 - [こちら](https://minkara.carview.co.jp/userid/2834887/car/2442400/4981106/6/note.aspx#title)参照
-- Status byte 1 (0x0d)
--- Bit 0 : Coolant Temp Sensor Error
--- Bit 1 : Inlet Air Temp Sensor Error
--- Bit 4 : Ambient Air Temp Sensor Error (But not installed on Mini)
--- Bit 5 : Fuel Temp Sensor Error (But not installed on Mini)
-- Status byte 2 (0x0e)
--- Bit 1 : Fuel pump cirkit Error
--- Bit 5 : ECU Vaccum Sensor Error
--- Bit 7 : T-Pot cirkit Error
+  - Status byte 1 (0x0d)
+    - Bit 0 : Coolant Temp Sensor Error
+    - Bit 1 : Inlet Air Temp Sensor Error
+    - Bit 4 : Ambient Air Temp Sensor Error (But not installed on Mini)
+    - Bit 5 : Fuel Temp Sensor Error (But not installed on Mini)
+  - Status byte 2 (0x0e)
+    - Bit 1 : Fuel pump cirkit Error
+    - Bit 5 : ECU Vaccum Sensor Error
+    - Bit 7 : T-Pot cirkit Error
+- [解析サイト](https://colinbourassa.github.io/car_stuff/mems_interface/)による
+  - 0x0D  Fault codes. On the Mini SPi, only two bits in this location are checked:
+    - Bit 0: Coolant temp sensor fault (Code 1)
+    - Bit 1: Inlet air temp sensor fault (Code 2)
+  - 0x0E  Fault codes. On the Mini SPi, only two bits in this location are checked:
+    - Bit 1: Fuel pump circuit fault (Code 10)
+    - Bit 7: Throttle pot circuit fault (Code 16)
+- 由来不明(ミニモニの画面表記のこと？) 
+  - 01:Coolant 02:Crank NG
+  - 01:T-Pot 02:ERROR 17 - 定番のエラー
+  - 01:Air Temp 02:Map Sens 03:Crank NG
+  - 01:Crank NG
+  - 01:Air Temp 02:Map Sens
+
+### ECUから返ってくるデータの意味
+
+data Frame80  = Frame80 {
+        size_80     :: Int , -- 0x00   Size of data frame, including this byte. This should be 0x1C (28 bytes) for the frame described here.
+        engineSpeed :: Int , -- 0x01-2 Engine speed in RPM (16 bits)
+        coolantTemp :: Int , -- 0x03   Coolant temperature in degrees C with +55 offset and 8-bit wrap
+        ambientTemp :: Int , -- 0x04   Computed ambient temperature in degrees C with +55 offset and 8-bit wrap
+        intakeATemp :: Int , -- 0x05   Intake air temperature in degrees C with +55 offset and 8-bit wrap
+        fuelTemp    :: Int , -- 0x06   Fuel temperature in degrees C with +55 offset and 8-bit wrap. This is not supported on the Mini SPi, and always appears as 0xFF.
+        mapSensor   :: Int , -- 0x07   MAP sensor value in kilopascals
+        battVoltage :: Float , -- 0x08 Battery voltage, 0.1V per LSB (e.g. 0x7B == 12.3V)
+        throttlePot :: Float , -- 0x09 Throttle pot voltage, 0.02V per LSB. WOT should probably be close to 0xFA or 5.0V.
+        idleSwitch  :: Bool ,-- 0x0A   Idle switch. Bit 4 will be set if the throttle is closed, and it will be clear otherwise.
+        *** It seems that Bit 0 will be set in spite of Bit 4 in case of MEMS 1.3J, at least. 31st Jusy 2021 by K.UONO ***
+        unknown0B   :: Word8,-- 0x0B   Unknown. Probably a bitfield. Observed as 0x24 with engine off, and 0x20 with engine running. A single sample during a fifteen minute test drive showed a value of 0x30.
+        pnClosed    :: Bool ,-- 0x0C   Park/neutral switch. Zero is closed, nonzero is open.
+        -- Fault codes. On the Mini SPi, only two bits in this location are checked:
+        faultCode1  :: Bool ,-- 0x0D  * Bit 0: Coolant temp sensor fault (Code 1)
+        faultCode2  :: Bool ,--       * Bit 1: Inlet air temp sensor fault (Code 2)
+        faultCode10 :: Bool ,-- 0x0E  * Bit 1: Fuel pump circuit fault (Code 10)
+        faultCode16 :: Bool ,--       * Bit 7: Throttle pot circuit fault (Code 16)
+        unknown0F   :: Word8,-- 0x0F   Unknown
+        unknown10   :: Word8,-- 0x10   Unknown
+        unknown11   :: Word8,-- 0x11   Unknown
+        idleACMP    :: Int  ,-- 0x12   Idle air control motor position. On the Mini SPi's A-series engine, 0 is closed, and 180 is wide open.
+        idleSpdDev  :: Int  ,-- 0x13-14 Idle speed deviation (16 bits)
+        unknown15   :: Word8,-- 0x15    Unknown
+        ignitionAd  :: Float,-- 0x16    Ignition advance, 0.5 degrees per LSB with range of -24 deg (0x00) to 103.5 deg (0xFF)
+        coilTime    :: Float,-- 0x17-18 Coil time, 0.002 milliseconds per LSB (16 bits)
+        unknown19   :: Word8,-- 0x19    Unknown
+        unknown1A   :: Word8,-- 0x1A    Unknown
+        unknown1B   :: Word8 -- 0x1B    Unknown
+    } deriving Show
 
 ### 各種センサーの役割や信号の意味
 

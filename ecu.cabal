@@ -1,13 +1,11 @@
-cabal-version: 1.12
+cabal-version: 3.4.0.0 -- 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
---
--- hash: a5e75bd7493d8ae657e65e63a832298312024f7226845d8e96738bd4f689095d
 
 name:           ecu
-version:        0.12.0
+version:        0.12.1
 description:    Please see the README on GitHub at <https://github.com/githubuser/ecu#readme>
 homepage:       https://github.com/kuono/ecu#readme
 bug-reports:    https://github.com/kuono/ecu/issues
@@ -29,7 +27,6 @@ library
   exposed-modules:
       ECU
       Lib
-      MEMSControl
       TextPlot
       UI
   other-modules:
@@ -43,23 +40,24 @@ library
     , bytestring
     , conduit
     , containers
-    , dhall
     , directory
     , disk-free-space
-    , lens
+    , exceptions
+    , lenses
     , linear
     , microlens
+    , process
     , random
     , serialport
     , split
     , stm
     , text
+    , textPlot
     , time
     , transformers
     , unix
     , vector
     , vty
---    , yaml
   default-language: Haskell2010
 
 executable ecu-exe
@@ -67,14 +65,13 @@ executable ecu-exe
   other-modules:
       ECU
       Lib
-      MEMSControl
       TextPlot
       UI
       Paths_ecu
   hs-source-dirs:
       app
       src
-  ghc-options: -threaded -Wall -rtsopts
+  ghc-options: -threaded -Wall -rtsopts -with-rtsopts=-N
   build-depends:
       array
     , base >=4.7 && <5
@@ -82,10 +79,10 @@ executable ecu-exe
     , bytestring
     , conduit
     , containers
-    , dhall
     , directory
     , disk-free-space
-    , lens
+    , exceptions
+    , lenses
     , linear
     , microlens
     , process
@@ -106,17 +103,15 @@ test-suite ecu-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      MEMS
       ECU
       Lib
-      MEMSControl
       TextPlot
       UI
       Paths_ecu
   hs-source-dirs:
       test
       src
-  ghc-options: -threaded -rtsopts
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       array
     , base >=4.7 && <5
@@ -124,12 +119,13 @@ test-suite ecu-test
     , bytestring
     , conduit
     , containers
-    , dhall
     , directory
     , disk-free-space
+    , exceptions
     , lenses
     , linear
     , microlens
+    , process
     , random
     , serialport
     , split

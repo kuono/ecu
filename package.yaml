@@ -1,10 +1,10 @@
 name:                ecu
-version:             0.9.0
+version:             0.12.1
 github:              "kuono/ecu"
-license:             BSD3
+license:             MIT
 author:              "Kentaro UONO"
 maintainer:          "info@kuono.net"
-copyright:           "2018-2020 Kentaro UONO"
+copyright:           "2018-2021 Kentaro UONO"
 
 extra-source-files:
 - README.md
@@ -22,25 +22,29 @@ description:         Please see the README on GitHub at <https://github.com/gith
 dependencies:
 - base >= 4.7 && < 5
 - array
-- serialport
-- time
-- stm
-- bytestring
-- disk-free-space
-- time
-- split
-- directory
-- unix
-- transformers
 - brick
-- vty
-- textPlot
+- bytestring
 - conduit
 - containers
-- microlens
+- directory
+- disk-free-space
+- exceptions
+- lenses
 - linear
-- vector
+- microlens
 - random
+- process
+- serialport
+- split
+- stm
+- time
+- textPlot
+- time
+- text
+- transformers
+- unix
+- vector
+- vty
 
 library:
   source-dirs:       src
@@ -55,11 +59,10 @@ executables:
     - src
     ghc-options:
     - -threaded
+    - -Wall
     - -rtsopts
     - -with-rtsopts=-N
-    - -Wall
     dependencies:
-    - ecu
     - stm
     - split
     - transformers
@@ -69,23 +72,28 @@ executables:
     - serialport
     - unix
     - brick
+    - text
     - vty
     - textPlot
     - containers
     - microlens
     - linear
+    - vector
+    - lenses
+    - process
     
 
 tests:
   ecu-test:
     main:                Spec.hs
-    source-dirs:         test
+    source-dirs:
+    - test
+    - src
     ghc-options:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - ecu
     - split
     - transformers
     - time
