@@ -32,10 +32,12 @@ import qualified Data.ByteString.Char8 as BS
 import qualified Control.Exception as Ex
 import Control.Concurrent
 import Control.Concurrent.STM.TChan
+import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.STM
 import Control.Monad.Trans.Class
+import Control.Monad.Trans.Except
 import Control.Monad.Trans.Reader
 import Data.Bits
 import Data.Char
@@ -98,35 +100,48 @@ data Env  = Env
     , lch   :: TChan Event      -- ^ log channel to write logs
     , tickt :: !ThreadId        -- ^ thread id
     }
-type MEMS = ReaderT Env IO
 --
+-- | MEMS Monad
+type MEMS  = ExceptT String (ReaderT Env IO) 
+-- ^ ExceptT e m a = ExceptT ( m (Either e a))
+--     MEMS a = ExceptT ( Reader Env IO  ( Either String a ) )
+--     runExceptT :: ExceptT e m a -> m (Either e a)
+--     runReaderT :: ReaderT r m a -> r -> m a
+-- 
 -- | main function
 --
-run ::  MEMS a -> (FilePath,BC.BChan Event,TChan UCommand,TChan Event) -> IO ()
-run c r = Ex.bracket {- :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
+run :: (FilePath,BC.BChan Event,TChan UCommand,TChan Event)  -- ^ enviromnent for ECU 
+    -> IO (Either String ())                                                  -- 
+run e = Ex.bracket {- :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
   -- for resource acquisition ( opening )
-  (ECU.init r) -- -> IO (Maybe Env)
+  (ECU.init e) -- ^ :: IO (Maybe Env)
   -- for resource releasoe ( closing )
-  (\case       --  
+  (\case  
       Nothing -> return () -- fail "Some error occured while running ecu."
       Just e' -> do
           flush $ port e'
           closeSerial $ port e'
           t <- currentTime
-          let e = OffLined
-          BC.writeBChan (dch e') (t,e)
+          let s = OffLined
+          BC.writeBChan (dch e') ( t , s )
           killThread $ tickt e'
       )
   -- for using resources
-  (\case      -- Maybe Env
-      Nothing  -> return () -- fail "ECU Initialization failed."
-      Just env -> do {  threadDelay 10000 ; _ <- runReaderT c env ; return () } ) -- start loop
-      -- threadDelay inserted on 10th April 2020 for testing wether or not having 
-      -- effect to continuous connection for inital usstable term. K.UONO
+  (\case      -- :: Maybe Env
+      Nothing  -> return $ Left "ECU Initialization failed."
+      Just env -> do             -- start loop
+          threadDelay 10000      -- threadDelay inserted on 10th April 2020 for testing wether or not having 
+          runReaderT (runExceptT loop) env  -- effect to continuous connection for inital usstable term. K.UONO
+                                 -- runExceptT :: ExceptT e m a -> m (Either e a)
+                                 -- type MEMS  = ExceptT String (ReaderT Env IO)
+                                 --   e = String m = ReaderT Env IO 
+                                 --  so runExceptT :: ExceptT String ReaderT Env IO a -> ReaderT (Either Env a )
+        )
 --
 loop :: MEMS ()
 loop = do
-    env <- ask
+    -- * set up environmental items
+    env <- lift ask
     let cmdchan = cch  env
         devfile = path env
         clearchan = do
@@ -134,20 +149,21 @@ loop = do
           case d of
               Just _  -> clearchan
               Nothing -> return () 
-    exist <- lift $ doesFileExist devfile
+    -- * start main loop
+    exist <- liftIO $ doesFileExist devfile
     if not exist 
       then do -- device file が存在しない（つまりUSBにRS232Cコンバータが接続されていなかった場合）
           report $ Error "Device Not Exist."
           return () -- ループから抜ける
       else do -- device file が存在していた場合（つまりUSBにRS232Cコンバータが接続されていた場合）
-          c <- lift $ atomically $ readTChan cmdchan
+          c <- lift . lift $ atomically $ readTChan cmdchan -- command を読み出す。
           r <- res c -- do command on mems
           report r -- データチャネルおよびログに結果を書き込む
           case (c,r) of
-            (Disconnect,_)       -> do { lift clearchan ; return () } -- 命令が切断だった場合，
-            (_, PortNotFound _ ) -> do { lift clearchan ; return () }
-            (_, OffLined )       -> do { lift clearchan ; return () }
-            (_, Error _ )        -> do { lift clearchan ; return () }
+            (Disconnect,_)       -> do { lift $ lift clearchan ; return () } -- 命令が切断だった場合，
+            (_, PortNotFound _ ) -> do { lift $ lift clearchan ; return () }
+            (_, OffLined )       -> do { lift $ lift clearchan ; return () }
+            (_, Error _ )        -> do { lift $ lift clearchan ; return () }
             _                    -> loop
                 -- つまり Init | Get807d | ClearFaults | RunFuelPump | StopFuelPump | 
                 -- GetIACPos | IncIACPos | DecIACPos | IncIgAd | DecIgAd | TestActuator
@@ -155,12 +171,12 @@ loop = do
 --
 report :: EvContents -> MEMS ()
 report c = do
-  t <- lift currentTime
-  e <- ask
+  t <- liftIO currentTime
+  e <- lift ask
   let datach = dch e
       logch  = lch e
-  lift $ BC.writeBChan datach (t,c)
-  lift $ atomically $ writeTChan logch (t,c)
+  lift . lift $ BC.writeBChan datach (t,c)
+  lift . lift $ atomically $ writeTChan logch (t,c)
   return ()
 
 --
@@ -217,10 +233,12 @@ init (f,dc,cc,lc)= do
                     -- data ModelDataSet  = ModelDataSet { mne :: MemsID , name :: !String , d8size :: !Int, d7size :: !Int} deriving Eq
                     md <- case m' of
                         Nothing  -> do -- In case of unknown model, read data to determine data length
-                            test <- runReaderT get807d $ Env { path = f, port = sp, model = snd mneUnknown, dch = dc , cch = cc , lch = lc , tickt = tt } 
+                            test <- runReaderT (runExceptT get807d) Env { path = f, port = sp, model = snd mneUnknown, dch = dc , cch = cc , lch = lc , tickt = tt } 
                             let (d8l,d7l) = case test of
-                                  Tick (d8,d7) -> (ord $ BS.index d8 0,ord $ BS.index d7 0)
-                                  _            -> (28,14)
+                                    Left  e  -> (28,14)
+                                    Right e' -> case e' of
+                                        Tick (d8,d7) -> (ord $ BS.index d8 0,ord $ BS.index d7 0)
+                                        _            -> (28,14)
                             return $ ( snd mneUnknown ) { name = "Unknown ( " ++ show d8l ++ ":" ++ show d7l ++ ")" ,d8size = d8l,d7size = d7l}
                         Just md' -> return $ md' { name = name md' ++ "(" ++ show (d8size md') ++ ":" ++ show (d7size md') ++ ")" } 
                     BC.writeBChan dc (j,Connected md)
@@ -230,13 +248,13 @@ init (f,dc,cc,lc)= do
 --
 get807d :: MEMS EvContents
 get807d =  do
-  e  <- ask
+  e  <- lift ask
   r8 <- sndCmd80
   case r8 of 
     Left  m    -> return $ Error m
     Right r8'  ->   
       if r8' == BS.empty then do
-          lift $ flush $ port e -- 取りこぼし対策。
+          liftIO $ flush $ port e -- 取りこぼし対策。
           return $ Error "Error in getting 80 data. Empty Response."
       else do
           r7 <- sndCmd7d
@@ -365,7 +383,7 @@ sndCmd7d = getData req7d
 -- | 
 getData :: Command -> MEMS (Either String BS.ByteString)
 getData c = do
-    e <- ask
+    e <- lift ask
     let c' = fst c
         p  = port e
     r  <- sendCommandAndGet1Byte p c'
@@ -386,15 +404,15 @@ getData c = do
 -- | 
 offline :: MEMS EvContents
 offline = do
-    e <- ask
+    e <- lift ask
     let p = port e
-    lift $ closeSerial p
+    liftIO $ closeSerial p
     return OffLined
 --
 -- | commands
 issue :: Command -> MEMS EvContents
 issue c = do
-    e <- ask
+    e <- lift ask
     let p = port e
     r <- sendCommandAndGet1Byte p $ fst c
     liftIO $ flush p
@@ -430,7 +448,7 @@ decIgAd = issue decia
 -- | 
 iacPos :: Command -> MEMS EvContents
 iacPos c = do
-    e <- ask
+    e <- lift ask
     let p = port e
     r <- sendCommandAndGet1Byte p $ fst c
     liftIO $ flush p
@@ -525,7 +543,7 @@ parse (d8,d7) =  {-# SCC "parse" #-}
 -- |  
 sendCommandAndGet1Byte :: SerialPort -> Char -> MEMS (Either String BS.ByteString)
 sendCommandAndGet1Byte p c = do
-    s <- lift $ send p $ BS.singleton c
+    s <- liftIO $ send p $ BS.singleton c
     if s == 0 then
         return $ Left $ "The command ( " ++ show c ++ " ) was not sent." -- BS.empty
     else
