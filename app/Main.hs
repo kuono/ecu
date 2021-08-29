@@ -48,7 +48,7 @@ main = do
         (os, path,intestmode) = case (null args,envs == "/Users/kuono") of
             (True,True) -> ( MacOS         , defaultUSBPathMac         , False )
             (True,_   ) -> ( RaspberryPiOS , defaultUSBPathRaspberryPi , False )
-            _           -> if args !! 0 == "-d"
+            _           -> if head args == "-d"
                                then ( MacOS       , defaultUSBPathMac , True  )
                                else error "error: exactly one arguments needed."
     iniVty  <- buildVty
@@ -58,7 +58,7 @@ main = do
     logdCh  <- atomically newTChan :: IO (TChan Event)
     iStatus <- initialState (evntCh,ucmdCh,logdCh,intestmode)
     _ <- forkIO $ runlog logdCh
-    _ <- forkIO $ forever $ ECU.run ECU.loop (path,evntCh,ucmdCh,logdCh) -- ^ fork communication thread
+    _ <- forkIO $ forever $ ECU.run (path,evntCh,ucmdCh,logdCh) -- ^ fork communication thread
     _ <- Brick.Main.customMain iniVty buildVty (Just evntCh) ecuMonitor iStatus
     Prelude.putStrLn "Thank you for using Mini ECU Monitor. See you again!"
     _ <- system $ if os == RaspberryPiOS then "sudo shutdown -h now" else "echo \"\"" -- ":" is a command do nothing on bash
@@ -67,8 +67,8 @@ main = do
 -- |　-- event handlers as an updating model function モデル更新関数群
 --
 handleEvent :: Status -> BrickEvent Name Event -> EventM Name (Next Status)
-handleEvent s (MouseUp   _ _ _   ) = continue s
-handleEvent s (MouseDown _ _ _ _ ) = continue s
+handleEvent s MouseUp   {} = continue s
+handleEvent s MouseDown {} = continue s
 handleEvent s (AppEvent (t,ECU.PortNotFound f)) =
     continue s
       { rdat = (rdat s)  
