@@ -13,6 +13,10 @@
 
 ## Change history
 
+### 0.12.2 2021.09.11
+
+- port close bug fix for raspberry pi
+
 ### 0.12.1 2021.08.29
 
 - type of MEMS monad was changed. MEMSモナドの型を変更した（ExceptTを組み込む）
