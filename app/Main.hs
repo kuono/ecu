@@ -57,11 +57,15 @@ main = do
     ucmdCh  <- atomically newTChan :: IO (TChan ECU.UCommand) 
     logdCh  <- atomically newTChan :: IO (TChan Event)
     iStatus <- initialState (evntCh,ucmdCh,logdCh,intestmode)
-    _ <- forkIO $ runlog logdCh
-    _ <- forkIO $ forever $ ECU.run (path,evntCh,ucmdCh,logdCh) -- ^ fork communication thread
-    _ <- Brick.Main.customMain iniVty buildVty (Just evntCh) ecuMonitor iStatus
+    logT <- forkIO $ runlog logdCh
+    ecuT <- forkIO $ forever $ ECU.run (path,evntCh,ucmdCh,logdCh) -- ^ fork communication thread
+    finalState <- Brick.Main.customMain iniVty buildVty (Just evntCh) ecuMonitor iStatus
+    let cmdchan = Lib.cchan finalState
+    _ <- atomically $ writeTChan cmdchan ECU.Disconnect   -- これで各スレッドは落としている 
     Prelude.putStrLn "Thank you for using Mini ECU Monitor. See you again!"
-    _ <- system $ if os == RaspberryPiOS then "sudo shutdown -h now" else "echo \"\"" -- ":" is a command do nothing on bash
+    -- killThread ecuT -- いきなり kill すると支障が出るか，要調査
+    -- killThread logT -- = throw ecuT ThreadKilled <- hCloseしている
+    _ <- system $ if ( os == RaspberryPiOS ) && testmode finalState then "sudo shutdown -h now" else "echo \"\"" -- ":" is a command do nothing on bash
     return ()
 --
 -- |　-- event handlers as an updating model function モデル更新関数群
@@ -131,6 +135,13 @@ handleEvent s (AppEvent (t,ECU.Tick r)) = do
 handleEvent s (VtyEvent (V.EvKey (V.KChar 'q') []))
   | inmenu s  = halt s
   | otherwise = continue s
+handleEvent s (VtyEvent (V.EvKey (V.KChar 's') []))
+  | inmenu s  = halt s { shutdown = True }
+  | otherwise = continue s
+handleEvent s (VtyEvent (V.EvKey V.KEsc []))
+  | testmode s = continue s { inmenu = True } -- { inmenu = not $ inmenu s}
+  | otherwise  = continue s { inmenu = not $ inmenu s }
+--
 handleEvent s (VtyEvent (V.EvKey (V.KChar '1') []))
   | not $ inmenu s = continue s
   | otherwise      = do
@@ -206,10 +217,6 @@ handleEvent s (VtyEvent (V.EvKey (V.KChar 'd') []))
                           Just _  -> iCoolT s
                           Nothing -> Just $ ECU.coolantTemp f
             }
---
-handleEvent s (VtyEvent (V.EvKey V.KEsc []))
-  | testmode s = continue s { inmenu = True } -- { inmenu = not $ inmenu s}
-  | otherwise  = continue s { inmenu = not $ inmenu s }
 --
 handleEvent s (VtyEvent (V.EvKey (V.KChar _) [])) = continue s
 --
