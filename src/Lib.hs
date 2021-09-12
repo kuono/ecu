@@ -7,7 +7,7 @@
 * Stability   : experimental
 * Portability : macOS Big Sur and RaspberyPi OS buster
 -}
-{-# LANGUAGE DeriveGeneric     #-}
+-- {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Lib where 
 
@@ -21,7 +21,7 @@ import Control.Monad.STM
 import Data.Fixed
 import Data.Time.LocalTime
 import Data.Time.Clock
-import Dhall
+-- import Dhall
 import qualified ECU
 import System.IO -- for stdin, Buffering Mode
 import System.Directory
@@ -29,9 +29,9 @@ import System.Environment
 import Text.Printf
 --
 ver   :: String
-ver   = "0.12.0"
+ver   = "0.12.2"
 date  :: String
-date  = "2021.07.30"
+date  = "2021.09.11"
 
 --
 -- # User Input Form related
@@ -61,12 +61,12 @@ data Env = MacOS | RaspberryPiOS | UnsupportedOS deriving Eq
 -- data Example = Example { foo :: Natural, bar :: Vector Double }
 --     deriving (Generic, Show)
 
-instance FromDhall Config
+-- instance FromDhall Config
 -- instance FromDhall OS
-data Config = Config
-    { usbDeviceFilePath :: String
---    , osEnvironment     :: Generic OS
-    } deriving (Generic,Show)
+-- data Config = Config
+--     { usbDeviceFilePath :: String
+-- --    , osEnvironment     :: Generic OS
+--     } deriving (Generic,Show)
 data Status = Status
     { testmode :: !Bool              -- ^ testmode : memsを接続しないで試す
     , env      :: Env                -- ^ env    : 
@@ -78,6 +78,7 @@ data Status = Status
     , cchan    :: TChan ECU.UCommand -- ^ cchan  : ECUにコマンドを送り込むチャンネル
     , lchan    :: TChan Event        -- ^ lchan  : 
     , inmenu   :: !Bool              -- ^ inmenu : 
+    , shutdown :: !Bool              -- ^ shutdown :: whether or not shutdown system after quit this app
     , menu     :: !Menu
     , lIacPos  :: !(Maybe Int)       -- ^ latest iac position
     , iCoolT   :: !(Maybe Int)       -- ^ initial coolant temperature
@@ -207,6 +208,7 @@ initialState (ech,cch,dch,tm) = do
     , cchan = cch
     , lchan = dch
     , inmenu = True
+    , shutdown = False
     , menu   = if exist then helpMenu else testMenu
     , lIacPos = Nothing :: Maybe Int  -- latest iac position
     , iCoolT  = Nothing :: Maybe Int  -- initial coolant temperature

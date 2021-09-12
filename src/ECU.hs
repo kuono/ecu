@@ -9,8 +9,10 @@
 -}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module ECU  ( Event  --    = (BS.ByteString,BS.ByteString)
             , RData  --    = Data807d
+            -- , Env (..)
             , Frame (..)
             , EvContents (..) -- =  PortNotFound FilePath | Connected ModelDataSet | ...
             , UCommand (..)
@@ -136,6 +138,16 @@ run e = Ex.bracket {- :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
                                  -- type MEMS  = ExceptT String (ReaderT Env IO)
                                  --   e = String m = ReaderT Env IO 
                                  --  so runExceptT :: ExceptT String ReaderT Env IO a -> ReaderT (Either Env a )
+    -- `catch` 
+    --     \( e :: SomeException) -> do
+    --         e' <- ask
+    --         flush $ port e'
+    --         closeSerial $ port e'
+    --         t <- currentTime
+    --         let s = OffLined
+    --         BC.writeBChan (dch e') ( t , s )
+    --         killThread $ tickt e'  
+    --         return () 
         )
 --
 loop :: MEMS ()
