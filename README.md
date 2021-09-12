@@ -8,9 +8,10 @@ Released under [the MIT license](https://opensource.org/licenses/mit-license.php
 
 ## Version history
 
+- 0.12.2   by K.UONO on 2021.09.11 bugs are fixed for rpi.
 - 0.12.1   by K.UONO on 2021.08.29 MEMS type was changed.
-- 0.12.0   by K.UONO on 2021.08.01 Dhall and configration file system 
-- 0.11.2   by K.Uono on 2021.07.28 Adoption for low Display raw number 
+- 0.12.0   by K.UONO on 2021.08.01 Dhall and configration file system.
+- 0.11.2   by K.Uono on 2021.07.28 Adoption for low Display raw number.
 - 0.11.1   by K.Uono on 2021.07.26 RaspberryPi OS adoption
 - 0.11.0   by K.Uono on 2021.07.23 Fault Code bug fix
 - 0.10     by K.Uono on 2017.11.19

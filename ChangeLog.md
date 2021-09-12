@@ -15,7 +15,8 @@
 
 ### 0.12.2 2021.09.11
 
-- port close bug fix for raspberry pi
+- port non-close bug was fixed for raspberry pi
+- auto shutdown call for raspberian is temporary stopped.
 
 ### 0.12.1 2021.08.29
 
