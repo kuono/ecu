@@ -29,7 +29,7 @@ import qualified Graphics.Vty as V
 import Graphics.Vty
 import Brick.BorderMap
 import TextPlot ( PlotConfig(..) , PlotFunction
-    --, ParamFunction(..), PlotColour(..) 
+    --, ParamFunction(..), PlotColour(..)
     , (.+),(.|),(.-)
     , plotStrWithConfig
     , emptyXYPlot
@@ -41,15 +41,15 @@ maxGraphLength :: Int  -- ^ Graph Plot Area width limitation
 maxGraphLength = 20
 -- dset:: V.Vector ECU.EvContents
 -- dset = V.singleton ECU.OffLined
--- 
+--
 -- UI Name space
--- 
+--
 data Display = Dialog | DataPanel | CurrentStatus | CurrentData | GraphLog | BarLog | TextLog
 --
 -- Graph related definitions
--- 
+--
 -- | Drawing instruction
-type Point = (Int,Int) -- ^ (x,y) x = 0..100, y = 0..100 
+type Point = (Int,Int) -- ^ (x,y) x = 0..100, y = 0..100
 data Instruction
     = Point              -- ^ Point
     | Line Point Point   -- ^ Line from Point 1 to Point 2
@@ -66,15 +66,18 @@ plotGraph = undefined
 --
 normalAttr , errorAttr , alertAttr , pgcompAttr , pgtodoAttr , espeedAttr
  , thpotAttr , msensAttr , batvAttr , mnotselectedAttr , mselectedAttr :: AttrName
-normalAttr = attrName "normalAttr"                  :: AttrName  --  黒背景色に白字
-errorAttr  = attrName "errorAttr"                   :: AttrName  --  黄背景色に赤字
-alertAttr  = attrName "alertAttr"                   :: AttrName  --  赤字；Boldはよくわからない
-pgcompAttr = attrName "progressComplete"            :: AttrName
-pgtodoAttr = attrName "progressIncomplete"          :: AttrName
-espeedAttr = attrName "espeedAttr"                  :: AttrName
-thpotAttr  = attrName "thpotAttr"                   :: AttrName
-msensAttr  = attrName "msensAttr"                   :: AttrName
-batvAttr   = attrName "batvAttr"                    :: AttrName
+-- | 黒背景色に白字
+normalAttr       = attrName "normalAttr"
+-- | 黄背景色に赤字
+errorAttr        = attrName "errorAttr"
+-- | 赤字；Boldはよくわからない
+alertAttr        = attrName "alertAttr"
+pgcompAttr       = attrName "progressComplete"
+pgtodoAttr       = attrName "progressIncomplete"
+espeedAttr       = attrName "espeedAttr"                  :: AttrName
+thpotAttr        = attrName "thpotAttr"                   :: AttrName
+msensAttr        = attrName "msensAttr"                   :: AttrName
+batvAttr         = attrName "batvAttr"                    :: AttrName
 mnotselectedAttr = attrName "menuisnotselectedAttr" :: AttrName
 mselectedAttr    = attrName "menuisselectedAttr"    :: AttrName
 --
@@ -100,7 +103,7 @@ theMap = attrMap V.defAttr
 --
 -- Form for default Data and function
 --
--- | types for user information on Form Dialog 
+-- | types for user information on Form Dialog
 data UserInfo =
   FormState { _portAddress    :: T.Text     -- ^ USB - シリアルコネクタを接続したポート名
             , _logFolderPath  :: T.Text     -- ^ ログファイルを格納する場所の名前
@@ -111,11 +114,11 @@ data UserInfo =
 
 -- | make User Information input form
 -- mkUIForm :: UserInfo -> Form UserInfo e Name
--- mkUIForm =  
+-- mkUIForm =
 --   let label s w = padBottom (Pad 1) $ (vLimit 1 $ hLimit 15 $ str s <+> fill ' ') <+> w
 --   in  newForm
 --         [ label "Port Path     :" @@= editTextField portAddress PortAddressField (Just 1)
---         , label "Forder Path   :" @@= editTextField logFolderPath LogFolderPathField (Just 1) 
+--         , label "Forder Path   :" @@= editTextField logFolderPath LogFolderPathField (Just 1)
 --         , label "Log File Name :" @@= editTextField logNameRule LogNameRuleField (Just 1)
 --         ]
 --
@@ -127,7 +130,7 @@ data UserInfo =
 --     ["*  *","   *","   *","   *","*  *","*   ","*   ","   *","*  *","*  *","    ","    "],
 --     ["*  *","   *"," ** ","****","****","****","****","   *","****","****","    ","    "],
 --     ["*  *","   *","**  ","   *","   *","   *","*  *","   *","*  *","   *","   *","    "],
---     ["****","   *","****","****","   *","****","****","   *","****","   *","  * ","  **"]]) 
+--     ["****","   *","****","****","   *","****","****","   *","****","   *","  * ","  **"]])
 -- alphabets :: ([Char], [[[Char]]])
 -- alphabets = (['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'],
 --   [["****","*   ","****","   *","****","****","****","*  *","*** ","  * ","*  *","*   ","* **","    ","    ","****","    ","****"," ***","****","*  *","    ","    ","   ","*  *","****"],
@@ -178,7 +181,7 @@ drawPanes ecu
             vLimit 1
             ( drawEcuStatus ecu <+> drawTime ecu )
         -- <=> drawMenu ecu
-        <=> B.hBorderWithLabel (str "MENU")
+        -- <=> B.hBorderWithLabel (str "MENU")
             --  <=> B.hBorder
         <=> draw807dData ecu--  <+> B.vBorder
         <=> drawIACPos ecu
@@ -230,8 +233,8 @@ draw807dData s = vLimit 21 $      B.hBorderWithLabel ( str "Data 80/7D" )
                               <=> ( hLimit 41 (drawData s) <+> B.vBorder <+> drawGraph' s )
 --  vLimit 21 $ case event s of
 --   ECU.PortNotFound p -> drawInitialScreen ver date-- hLimit 60 $ vBox [drawData s]
---   _                  -> -- ECU.OffLine or ECU.OnLine 
---         B.hBorderWithLabel ( str "Data 80/7D" ) 
+--   _                  -> -- ECU.OffLine or ECU.OnLine
+--         B.hBorderWithLabel ( str "Data 80/7D" )
 --     <=> ( hLimit 41 (drawData s) <+> B.vBorder <+> drawGraph' s )
 --
 drawBar :: Status -> Widget Name
@@ -308,7 +311,7 @@ drawGraph s = viewport GraphPane Both $ str $ plotStrWithConfig config graph
     o2vt t = case e t of
                 ECU.Tick r -> 100.0 / 1000.0 * ( fromIntegral . ECU.lambda_voltage $ ECU.parse r )
                 _          -> 0
---  
+--
 -- | 単純文字列グラフバージョン
 drawGraph' :: Status -> Widget Name
 drawGraph' s = viewport GraphPane Both $
@@ -358,10 +361,10 @@ drawEcuFaultStatus s = case event s of
                 _           -> ECU.parse ECU.emptyData807d
         e0d = printf "%2X" $ ECU.faultCode0D d'
         e0e = printf "%2X" $ ECU.faultCode0E d'
-        e01 = ECU.faultCode1  d' -- (01) Coolant temp Sensor 
-        e02 = ECU.faultCode2  d' -- (02) Air temp sensor 
-        e10 = ECU.faultCode10 d' -- (10) Fuel pump cirkit 
-        e16 = ECU.faultCode16 d' -- (16) Throttle position sensor 
+        e01 = ECU.faultCode1  d' -- (01) Coolant temp Sensor
+        e02 = ECU.faultCode2  d' -- (02) Air temp sensor
+        e10 = ECU.faultCode10 d' -- (10) Fuel pump cirkit
+        e16 = ECU.faultCode16 d' -- (16) Throttle position sensor
         ex4 = ECU.faultCodeX4 d' -- (??) Maybe Ambient air temp Sensor Error
         ex5 = ECU.faultCodeX5 d' -- (??) Maybe Fuel Temp Sensor Error *
         ey5 = ECU.faultCodeY5 d' -- (??) Maybe intake manifold pressure sesnor (MAP Sensor)
@@ -407,7 +410,7 @@ drawData s = viewport DataPane Vertical $ case event s of
         coolantTemp = ECU.coolantTemp d'
         idleSwitch :: String
         idleSwitch  = if testBit ( ECU.idleByte d' ) ( if model s == snd ECU.mne10078 then 1 else 4 )
-                          then "IDLE" else "T.ON" 
+                          then "IDLE" else "T.ON"
 -- Prelude.putStrLn $ vt100mv 30 0  ++ "----------------- Log -------------------------"
 -- mapM_ (Prelude.putStrLn . take 40 ) (if length logs >= 4 then take 4 logs else logs)
 -- Prelude.putStrLn $ vt100mv 36 0  ++ "-----------------------------------------------" ++ vt100mv 3 0

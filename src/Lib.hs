@@ -29,9 +29,9 @@ import System.Environment
 import Text.Printf
 --
 ver   :: String
-ver   = "0.12.2"
+ver   = "0.12.3"
 date  :: String
-date  = "2021.09.11"
+date  = "2021.11.01"
 
 --
 -- # User Input Form related

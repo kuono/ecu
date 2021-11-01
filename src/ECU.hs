@@ -1,6 +1,6 @@
 {- |
 * Module      : ECU
-* Description : Ecu Communication Driver for Rover Mini MEMS
+* Description : Ecu Server and Communication Driver for Rover Mini MEMS
 * Copyright   : (c) Kentaro UONO, 2018-2021
 * License     : MIT Licence
 * Maintainer  : info@kuono.net
@@ -109,18 +109,18 @@ type MEMS  = ExceptT String (ReaderT Env IO)
 --     MEMS a = ExceptT ( Reader Env IO  ( Either String a ) )
 --     runExceptT :: ExceptT e m a -> m (Either e a)
 --     runReaderT :: ReaderT r m a -> r -> m a
+-- --------------------------------------------------
 -- 
 -- | main function
---
 run :: (FilePath,BC.BChan Event,TChan UCommand,TChan Event)  -- ^ enviromnent for ECU 
     -> IO (Either String ())                                                  -- 
-run e = Ex.bracket {- :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
-  -- for resource acquisition ( opening )
-  (ECU.init e) -- ^ :: IO (Maybe Env)
+run e = Ex.bracket --  IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
+  --  for resource acquisition ( opening )
+  (ECU.init e) --  IO (Either String Env)
   -- for resource releasoe ( closing )
   (\case  
-      Nothing -> return () -- fail "Some error occured while running ecu."
-      Just e' -> do
+      Left  e  -> return () -- fail "Some error occured while running ecu."
+      Right e' -> do
           flush $ port e'
           closeSerial $ port e'
           t <- currentTime
@@ -130,8 +130,8 @@ run e = Ex.bracket {- :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
       )
   -- for using resources
   (\case      -- :: Maybe Env
-      Nothing  -> return $ Left "ECU Initialization failed."
-      Just env -> do             -- start loop
+      Left  e   -> return $ Left "ECU Initialization failed."
+      Right env -> do             -- start loop
           threadDelay 10000      -- threadDelay inserted on 10th April 2020 for testing wether or not having 
           runReaderT (runExceptT loop) env  -- effect to continuous connection for inital usstable term. K.UONO
                                  -- runExceptT :: ExceptT e m a -> m (Either e a)
@@ -152,7 +152,7 @@ run e = Ex.bracket {- :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
 --
 loop :: MEMS ()
 loop = do
-    -- * set up environmental items
+    -- set up environmental items
     env <- lift ask
     let cmdchan = cch  env
         devfile = path env
@@ -161,7 +161,7 @@ loop = do
           case d of
               Just _  -> clearchan
               Nothing -> return () 
-    -- * start main loop
+    -- start main loop
     exist <- liftIO $ doesFileExist devfile
     if not exist 
       then do -- device file が存在しない（つまりUSBにRS232Cコンバータが接続されていなかった場合）
@@ -208,7 +208,7 @@ res DecIgAd      = decIgAd
 res _            = get807d -- 未実装のコマンドは無視する
 -- | ecu 初期化関数　
 init ::(FilePath,BC.BChan Event,TChan UCommand,TChan Event) -- ^ デバイスパス，UIイベント・送信・受信各チャネル
-     -> IO (Maybe Env)
+     -> IO (Either String Env)
 init (f,dc,cc,lc)= do
     -- putStrLn "Initializing started."
     threadDelay 1000000 {- 1sec delay -}
@@ -218,7 +218,7 @@ init (f,dc,cc,lc)= do
         then do
             BC.writeBChan dc (j,PortNotFound f)
             -- atomically $ writeTChan lc (j,PortNotFound f) 未接続時にログが巨大化するためコメントアウト
-            return Nothing
+            return $ Left "Port Not Found."
         else do
             sp   <- openSerial f defaultSerialSettings { commSpeed = CS9600, timeout= 1, flowControl = Software }
             --
@@ -235,7 +235,11 @@ init (f,dc,cc,lc)= do
             _    <- tryRecv1Byte sp 5
             m <- tryRecvNBytes sp BS.empty 4 -- モデルデータの読みとり
             if m == BS.empty || BS.length m /= 4
-                then return Nothing
+                then do -- in case of illegullar response
+                    closeSerial sp -- 2021.11.01 bug fixed
+                    j' <- currentTime
+                    BC.writeBChan dc (j', Error "Initialization Response Fault")
+                    return $ Left "Initialization Response Fault." 
                 else do
                     tt <- forkIO $ forever $ do -- 定期的にデータ送付を命令するループスレッドを立ち上げる
                         atomically $ writeTChan cc Get807d
@@ -256,7 +260,7 @@ init (f,dc,cc,lc)= do
                     BC.writeBChan dc (j,Connected md)
                     atomically $ writeTChan lc (j,Connected md)
                     -- atomically $ writeTChan cc GetIACPos -- ^ 2020.01.11 追記
-                    return $ Just Env { path = f, port = sp, model = md, dch = dc , cch = cc , lch = lc , tickt = tt } 
+                    return $ Right Env { path = f, port = sp, model = md, dch = dc , cch = cc , lch = lc , tickt = tt } 
 --
 get807d :: MEMS EvContents
 get807d =  do
