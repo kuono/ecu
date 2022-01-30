@@ -1,11 +1,11 @@
 {- |
 * Module      : Main
 * Description : ECU Monitor for Rover Mini
-* Copyright   : (c) Kentaro UONO, 2018-2021
+* Copyright   : (c) Kentaro UONO, 2018-2022
 * License     : MIT Licence
 * Maintainer  : info@kuono.net
 * Stability   : experimental
-* Portability : macOS Big Sur and RaspberyPi OS buster
+* Portability : macOS Big Sur/Monterey and RaspberyPi OS buster
 -}
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
@@ -40,6 +40,14 @@ ecuMonitor = App { appDraw         = drawPanes
                  }
 --
 -- | Main function 主関数
+-- main' :: IO ()
+-- main' = do
+--   hdl <- prepare
+--   with hdl mainloop
+--   where
+--     mainloop = undefined
+-- 
+-- | Main action 主関数
 main :: IO ()
 main = do
     args <- System.Environment.getArgs
@@ -65,7 +73,13 @@ main = do
     Prelude.putStrLn "Thank you for using Mini ECU Monitor. See you again!"
     -- killThread ecuT -- いきなり kill すると支障が出るか，要調査
     -- killThread logT -- = throw ecuT ThreadKilled <- hCloseしている
-    _ <- system $ if ( os == RaspberryPiOS ) && testmode finalState then "sudo shutdown -h now" else "echo \"\"" -- ":" is a command do nothing on bash
+    _ <- system $ if os /= RaspberryPiOS then
+                    "echo \"\""  -- ":" is a command do nothing on bash
+                  else
+                    case after finalState of
+                      Shutdown ->  "sudo shutdown -h now" 
+                      Restart  ->  "sudo shutdown -r now"
+                      Quit     ->  "echo \"\""  -- ":" is a command do nothing on bash
     return ()
 --
 -- |　-- event handlers as an updating model function モデル更新関数群
@@ -132,12 +146,9 @@ handleEvent s (AppEvent (t,ECU.Tick r)) = do
 --
 -- Event Handlers as a part of UI
 --
-handleEvent s (VtyEvent (V.EvKey (V.KChar 'q') []))
-  | inmenu s  = halt s
-  | otherwise = continue s
-handleEvent s (VtyEvent (V.EvKey (V.KChar 's') []))
-  | inmenu s  = halt s { shutdown = True }
-  | otherwise = continue s
+handleEvent s (VtyEvent (V.EvKey (V.KChar 'q') [])) = halt s { after = Quit     }
+handleEvent s (VtyEvent (V.EvKey (V.KChar 'r') [])) = halt s { after = Restart  }
+handleEvent s (VtyEvent (V.EvKey (V.KChar 's') [])) = halt s { after = Shutdown }
 handleEvent s (VtyEvent (V.EvKey V.KEsc []))
   | testmode s = continue s { inmenu = True } -- { inmenu = not $ inmenu s}
   | otherwise  = continue s { inmenu = not $ inmenu s }
