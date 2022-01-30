@@ -5,13 +5,13 @@ cabal-version: 1.12
 -- see: https://github.com/sol/hpack
 
 name:           ecu
-version:        0.12.3
+version:        0.13.0
 description:    Please see the README on GitHub at <https://github.com/githubuser/ecu#readme>
 homepage:       https://github.com/kuono/ecu#readme
 bug-reports:    https://github.com/kuono/ecu/issues
 author:         Kentaro UONO
 maintainer:     info@kuono.net
-copyright:      2018-2021 Kentaro UONO
+copyright:      2018-2022 Kentaro UONO
 license:        MIT
 license-file:   LICENSE
 build-type:     Simple
@@ -29,6 +29,7 @@ library
       Lib
       TextPlot
       UI
+      UI.Types
   other-modules:
       Paths_ecu
   hs-source-dirs:
@@ -46,6 +47,7 @@ library
     , lenses
     , linear
     , microlens
+    , package-version
     , process
     , random
     , serialport
@@ -67,6 +69,7 @@ executable ecu-exe
       Lib
       TextPlot
       UI
+      UI.Types
       Paths_ecu
   hs-source-dirs:
       app
@@ -85,6 +88,7 @@ executable ecu-exe
     , lenses
     , linear
     , microlens
+    , package-version
     , process
     , random
     , serialport
@@ -107,6 +111,7 @@ test-suite ecu-test
       Lib
       TextPlot
       UI
+      UI.Types
       Paths_ecu
   hs-source-dirs:
       test
@@ -125,6 +130,7 @@ test-suite ecu-test
     , lenses
     , linear
     , microlens
+    , package-version
     , process
     , random
     , serialport

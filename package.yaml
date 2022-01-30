@@ -1,10 +1,10 @@
 name:                ecu
-version:             0.12.3
+version:             0.13.0
 github:              "kuono/ecu"
 license:             MIT
 author:              "Kentaro UONO"
 maintainer:          "info@kuono.net"
-copyright:           "2018-2021 Kentaro UONO"
+copyright:           "2018-2022 Kentaro UONO"
 
 extra-source-files:
 - README.md
@@ -45,6 +45,7 @@ dependencies:
 - unix
 - vector
 - vty
+- package-version
 
 library:
   source-dirs:       src
@@ -81,6 +82,7 @@ executables:
     - vector
     - lenses
     - process
+
     
 
 tests:

@@ -8,6 +8,7 @@ Released under [the MIT license](https://opensource.org/licenses/mit-license.php
 
 ## Version history
 
+- 0.13.0   by K.UONO on 2022.01.30 UI arrange was changed.
 - 0.12.3   by K.UONO on 2021.11.01 bug fix
 - 0.12.2   by K.UONO on 2021.09.11 bugs are fixed for rpi.
 - 0.12.1   by K.UONO on 2021.08.29 MEMS type was changed.

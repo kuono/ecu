@@ -17,7 +17,8 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver: lts-13.11
+resolver: lts-18.23
+# resolver: lts-13.11
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -47,6 +48,7 @@ extra-deps:
 - word-wrap-0.4.1@sha256:f72233b383ef569c557bfd9812cbb8e306c415ce509082c0bd15ee51c0239ccc,1606
 - textPlot-1.0@sha256:adcb61573078b42034f2d191a26971a752ce82fe7f572943f6d26865fc374c78,650
 - lenses-0.1.8@sha256:3ea7136f506826b8a623cdee58cc19512f9a56f50a4a842a29968e592cf4b54c,1516
+- package-version-0.1.0.0@sha256:bb9fc93e905540aa8e1b32f80c2dc82756a4481c63779bd92e3796ed8085ab98,2854
 # - bytestring-0.10.8.2
 # - time-1.8.0.4
 # - split-0.2.3.3
