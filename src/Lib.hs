@@ -9,8 +9,10 @@
 -}
 -- {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Lib where 
 
+import Data.Version.Package as D
 import qualified Brick.BChan as BC
 import Control.Concurrent.STM.TChan
 import qualified Control.Exception as Ex
@@ -29,9 +31,7 @@ import System.Environment
 import Text.Printf
 --
 ver   :: String
-ver   = "0.12.3"
-date  :: String
-date  = "2021.11.01"
+ver   = $$(packageVersionStringTH "ecu.cabal")
 
 --
 -- # User Input Form related
@@ -67,6 +67,7 @@ data Env = MacOS | RaspberryPiOS | UnsupportedOS deriving Eq
 --     { usbDeviceFilePath :: String
 -- --    , osEnvironment     :: Generic OS
 --     } deriving (Generic,Show)
+data AfterAction = Restart | Shutdown | Quit
 data Status = Status
     { testmode :: !Bool              -- ^ testmode : memsを接続しないで試す
     , env      :: Env                -- ^ env    : 
@@ -78,7 +79,7 @@ data Status = Status
     , cchan    :: TChan ECU.UCommand -- ^ cchan  : ECUにコマンドを送り込むチャンネル
     , lchan    :: TChan Event        -- ^ lchan  : 
     , inmenu   :: !Bool              -- ^ inmenu : 
-    , shutdown :: !Bool              -- ^ shutdown :: whether or not shutdown system after quit this app
+    , after    :: !AfterAction       -- ^ shutdown :: whether or not shutdown system after quit this app
     , menu     :: !Menu
     , lIacPos  :: !(Maybe Int)       -- ^ latest iac position
     , iCoolT   :: !(Maybe Int)       -- ^ initial coolant temperature
@@ -172,7 +173,7 @@ coolanttemp = GraphItem { name = "Coolant Temp(\'C )",
 
 -- | デバイス名が指定されなかった場合に使うパス名　
 defaultUSBPathMac         :: FilePath 
-defaultUSBPathMac         = "/dev/tty.usbserial-DO01OV70"
+defaultUSBPathMac         = "/dev/tty.usbserial-DO01OV7@"
 defaultUSBPathRaspberryPi :: FilePath
 defaultUSBPathRaspberryPi = "/dev/ttyUSB0"
 -- oldUSBPath                = "/dev/tty.usbserial-DJ00L8EZ" -- :: FilePath
@@ -208,7 +209,7 @@ initialState (ech,cch,dch,tm) = do
     , cchan = cch
     , lchan = dch
     , inmenu = True
-    , shutdown = False
+    , after  = Quit
     , menu   = if exist then helpMenu else testMenu
     , lIacPos = Nothing :: Maybe Int  -- latest iac position
     , iCoolT  = Nothing :: Maybe Int  -- initial coolant temperature
