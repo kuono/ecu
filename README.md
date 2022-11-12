@@ -2,12 +2,13 @@
 
 ## preface
 
-Copyright (c) 2019-2021 by Kentaro UONO
+Copyright (c) 2019-2022 by Kentaro UONO
 
 Released under [the MIT license](https://opensource.org/licenses/mit-license.php)
 
 ## Version history
 
+- 0.16.0   by K.UONO on 2022.11.12 to adopt brick 1.*
 - 0.13.0   by K.UONO on 2022.01.30 UI arrange was changed.
 - 0.12.3   by K.UONO on 2021.11.01 bug fix
 - 0.12.2   by K.UONO on 2021.09.11 bugs are fixed for rpi.
