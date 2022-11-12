@@ -9,44 +9,89 @@
 -}
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
-
+--
 import Lib
+    ( currentTime,
+      defaultUSBPathMac,
+      defaultUSBPathRaspberryPi,
+      frameTitle,
+      localTimetoString,
+      AfterAction(Quit, Shutdown, Restart),
+      OSEnv(RaspberryPiOS, MacOS) )
+import Brick ( customMain )
+import qualified Brick.BChan as BC
 import qualified ECU
 import UI
+    ( Status(after, cchan), initialState, ecuMonitor, frametoTable ) 
 
-import Control.Concurrent
-import Control.Concurrent.STM.TChan
-import Control.Monad
-import Control.Monad.STM
-import Control.Monad.IO.Class
-import System.Environment (getArgs,getEnv) --,getEnvironment)
-import System.Process -- for auto exiting on Raspberry Pi 
+import Control.Concurrent ( forkIO )
+import Control.Concurrent.STM.TChan ( TChan, newTChan, writeTChan, readTChan )
+import Control.Exception as Ex ( catch, SomeException )
+import Control.Monad ( forever , when)
+import Control.Monad.STM ( atomically )
+import Data.Fixed ( showFixed )
+import Data.Time
+    ( LocalTime(LocalTime), TimeOfDay(todSec, todHour, todMin) )
+import System.Environment ( getArgs, getEnv ) --,getEnvironment)
+import System.IO
+    ( Handle,
+      hClose,
+      hFlush,
+      hPutStr,
+      hPutStrLn,
+      withFile,
+      IOMode(WriteMode) )
+import System.Process ( system ) -- for auto exiting on Raspberry Pi 
+import Text.Printf ( printf ) 
 
-import Brick
-import Brick.Main
--- import Brick.Forms
-import qualified Brick.BChan as BC
 import qualified Graphics.Vty as V
 --
--- * Type definitions
---
--- | App type required by the TUI library Brick.
-ecuMonitor :: App Status Event Name
-ecuMonitor = App { appDraw         = drawPanes             
-                 , appChooseCursor = neverShowCursor  
-                 , appHandleEvent  = handleEvent      
-                 , appStartEvent   = return            
-                 , appAttrMap      = const theMap        
-                 }
---
--- | Main function 主関数
--- main' :: IO ()
--- main' = do
---   hdl <- prepare
---   with hdl mainloop
---   where
---     mainloop = undefined
 -- 
+runlog :: TChan ECU.Event -> IO ()
+runlog ech = forever $ do
+  l <- logFileName :: IO FilePath
+  withFile l WriteMode $
+    \h -> do
+      hPutStrLn h  $ "Date,Time," ++ frameTitle
+      loop h
+    where loop :: Handle -> IO ()
+          loop h = 
+            do
+              -- r <- System.DiskSpace.getAvailSpace l
+              (t,e) <- atomically $ readTChan ech
+              let j  = localTimetoString t
+              hPutStr h $ j ++ ","
+              hPutStr h $ case e of 
+                ECU.Tick r         -> frametoTable $ ECU.parse r
+                ECU.GotIACPos p    -> " Got IAC Pos    : " ++ show p
+                ECU.PortNotFound f -> " Port Not Found : " ++ f
+                ECU.Connected m    -> " Connected      : " ++ show (ECU.model m)
+                ECU.OffLined       -> " Off Lined. "
+                ECU.Done m         -> " Done           : " ++ show m
+                ECU.Error s        -> " Error          : " ++ s
+              hPutStrLn h $ case e of 
+                ECU.Tick r -> show r
+                _          -> ""
+              hFlush h
+              when (e /= ECU.OffLined) $ loop h
+            `Ex.catch`
+              \e -> do
+                putStrLn $ "Exception " ++ show (e::Ex.SomeException) ++ "issued."
+                hClose h  
+--
+logFileName :: IO FilePath
+logFileName = do
+    time <- currentTime :: IO LocalTime
+    return $ localtimeToFilePath time
+    where localtimeToFilePath (LocalTime n t) =  -- to convert constant length string
+              let hi     = show n
+                  ji     = todHour t
+                  hun    = todMin  t 
+                  byo    = todSec  t
+                  byo'   = take 2 $ if byo >= 10 then showFixed False byo
+                                    else '0':showFixed False byo
+              in printf "ECULog%10s_%02d.%02d.%2s.csv" hi ji hun byo' -- ex. ECULog2018-10-15_17.27.26.csv
+              --  ./log/ECU...としていたが，ディレクトリが存在していないとランタイムエラーを起こすので変更
 -- | Main action 主関数
 main :: IO ()
 main = do
@@ -56,20 +101,24 @@ main = do
         (os, path,intestmode) = case (null args,envs == "/Users/kuono") of
             (True,True) -> ( MacOS         , defaultUSBPathMac         , False )
             (True,_   ) -> ( RaspberryPiOS , defaultUSBPathRaspberryPi , False )
-            _           -> if head args == "-d"
-                               then ( MacOS       , defaultUSBPathMac , True  )
+            _           -> if length args == 1 
+                               then ( os , head args , True )
                                else error "error: exactly one arguments needed."
-    iniVty  <- buildVty
-    
-    evntCh  <- BC.newBChan 10 :: IO (BC.BChan Event) -- ^ make an event channel for Brick
-    ucmdCh  <- atomically newTChan :: IO (TChan ECU.UCommand) 
-    logdCh  <- atomically newTChan :: IO (TChan Event)
-    iStatus <- initialState (evntCh,ucmdCh,logdCh,intestmode)
-    logT <- forkIO $ runlog logdCh
-    ecuT <- forkIO $ forever $ ECU.run (path,evntCh,ucmdCh,logdCh) -- ^ fork communication thread
-    finalState <- Brick.Main.customMain iniVty buildVty (Just evntCh) ecuMonitor iStatus
-    let cmdchan = Lib.cchan finalState
+    iniVty  <- buildVty    
+    evntCh  <- BC.newBChan 10      :: IO (BC.BChan ECU.Event    )            
+    ucmdCh  <- atomically newTChan :: IO (TChan    ECU.UCommand ) 
+    logdCh  <- atomically newTChan :: IO (TChan    ECU.Event    )
+
+    iStatus <- initialState
+    -- | ここの処理が原始的すぎ。
+    _ <- forkIO $ runlog logdCh
+    _ <- forkIO $ forever $ ECU.run (path,evntCh,ucmdCh,logdCh) 
+
+    finalState <- Brick.customMain iniVty buildVty (Just evntCh) ecuMonitor iStatus
+
+    let cmdchan = cchan finalState
     _ <- atomically $ writeTChan cmdchan ECU.Disconnect   -- これで各スレッドは落としている 
+
     Prelude.putStrLn "Thank you for using Mini ECU Monitor. See you again!"
     -- killThread ecuT -- いきなり kill すると支障が出るか，要調査
     -- killThread logT -- = throw ecuT ThreadKilled <- hCloseしている
@@ -81,155 +130,4 @@ main = do
                       Restart  ->  "sudo shutdown -r now"
                       Quit     ->  "echo \"\""  -- ":" is a command do nothing on bash
     return ()
---
--- |　-- event handlers as an updating model function モデル更新関数群
---
-handleEvent :: Status -> BrickEvent Name Event -> EventM Name (Next Status)
-handleEvent s MouseUp   {} = continue s
-handleEvent s MouseDown {} = continue s
-handleEvent s (AppEvent (t,ECU.PortNotFound f)) =
-    continue s
-      { rdat = (rdat s)  
-        { evnt = ( t,ECU.PortNotFound f ) 
-        , note = "Port Not Found."
-        }
-      }
---
-handleEvent s (AppEvent (t,ECU.Connected m)) = 
-    continue s 
-      { model = m
-      , rdat = (rdat s)
-        { evnt = ( t,ECU.Connected m )
-        , note = "Connected."
-        }
-      }
---
-handleEvent s (AppEvent (t,ECU.Error estr)) = 
-    continue s { rdat = (rdat s) { 
-        evnt = ( t,ECU.Error estr )
-      , note = "Error " ++ estr } }
---
-handleEvent s (AppEvent (t,ECU.Done m)) = 
-    continue s { rdat = (rdat s) { evnt = ( t,ECU.Done m) } }
---
-handleEvent s (AppEvent (t,ECU.GotIACPos p)) = 
-    continue s 
-      { rdat = (rdat s) 
-        { evnt = ( t,ECU.GotIACPos p ) 
-        }
-      , lIacPos = Just p 
-      }
---
-handleEvent s (AppEvent (t,ECU.OffLined)) = 
-    continue s { rdat = (rdat s) { evnt = ( t,ECU.OffLined ) } }
---  
-handleEvent s (AppEvent (t,ECU.Tick r)) = do
-    let f = ECU.parse r
-    continue $ s
-      { rdat = DataSet
-          { evnt = ( t,ECU.Tick r )
-          , gdat = 
-                  [ (engspeed,    ECU.engineSpeed  f )
-                  , (tposition,   ECU.ithrottlePot f )
-                  , (mapsensor,   ECU.mapSensor    f )
-                  , (battvoltage, ECU.ibattVoltage f )
-                  , (coolanttemp, ECU.coolantTemp  f )
-                  ]
-          , note = "Tick"
-          }
-      , dset    = take maxData $ rdat s : dset s
-      , lIacPos = Just $ ECU.idleACMP f
-      , iCoolT  = case iCoolT s of
-          Just _  -> iCoolT s
-          Nothing -> Just $ ECU.coolantTemp f  
-      }
---
--- Event Handlers as a part of UI
---
-handleEvent s (VtyEvent (V.EvKey (V.KChar 'q') [])) = halt s { after = Quit     }
-handleEvent s (VtyEvent (V.EvKey (V.KChar 'r') [])) = halt s { after = Restart  }
-handleEvent s (VtyEvent (V.EvKey (V.KChar 's') [])) = halt s { after = Shutdown }
-handleEvent s (VtyEvent (V.EvKey V.KEsc []))
-  | testmode s = continue s { inmenu = True } -- { inmenu = not $ inmenu s}
-  | otherwise  = continue s { inmenu = not $ inmenu s }
---
-handleEvent s (VtyEvent (V.EvKey (V.KChar '1') []))
-  | not $ inmenu s = continue s
-  | otherwise      = do
-        let ch = cchan s
-        liftIO $ atomically $ writeTChan ch ECU.Init
-        continue s { rdat = (rdat s) { note = "I will initialize mems." }}
-handleEvent s (VtyEvent (V.EvKey (V.KChar '2') []))
-  | not $ testmode s = continue s { rdat = (rdat s) { note = ""}}
-  | otherwise        = do
-        let ch = cchan s
-        liftIO $ atomically $ writeTChan ch ECU.Disconnect
-        continue s { rdat = (rdat s) { note = "I will disconnect mems."}}
-handleEvent s (VtyEvent (V.EvKey (V.KChar '0') []))
-  | inmenu s && not (testmode s) = do
-        let ch = cchan s
-        liftIO $ atomically $ writeTChan ch ECU.ClearFaults
-        continue s { rdat = (rdat s) { note = "I will clear faults."}}
-  | otherwise = continue s { rdat = (rdat s) { note = "Got clear fault command but do nothing."}}
--- | 'p' -> Get IAC Position 
--- handleEvent s (VtyEvent (V.EvKey (V.KChar 'p') []))
---   | inmenu s && not (testmode s) = do
---         let ch = cchan s
---         liftIO $ atomically $ writeTChan ch ECU.GetIACPos
---         continue s { rdat = (rdat s) { note = "I will get IAC Position."}}
---   | otherwise = continue s { rdat = (rdat s) { note = ""}}
-handleEvent s (VtyEvent (V.EvKey V.KRight []))
-  | not $ inmenu s = continue s
-  | otherwise = do
-            let ch = cchan s
-            liftIO $ atomically $ writeTChan ch ECU.IncIACPos
-            continue s { rdat = (rdat s) { note = "I will increment IAC Pos." }}
-handleEvent s (VtyEvent (V.EvKey V.KLeft [])) 
-  | not $ inmenu s = continue s
-  | otherwise = do
-            let ch = cchan s
-            liftIO $ atomically $ writeTChan ch ECU.DecIACPos
-            continue s { rdat = (rdat s) { note = "I will decrement IAC Pos." }}
-handleEvent s (VtyEvent (V.EvKey V.KUp []))
-  | not $ inmenu s = continue s
-  | otherwise = do
-            let ch = cchan s
-            liftIO $ atomically $ writeTChan ch ECU.IncIgAd
-            continue s { rdat = (rdat s) { note = "I will increment Ignition Ad." }}
-handleEvent s (VtyEvent (V.EvKey V.KDown [])) 
-  | not $ inmenu s = continue s
-  | otherwise = do
-            -- t <- liftIO Lib.currentTime
-            let ch = cchan s
-            liftIO $ atomically $ writeTChan ch ECU.DecIgAd
-            continue s { rdat = (rdat s) { note = "I will decrement Ignition Ad." }}
--- | 'd' -> get dummy data
---     This is a temporal handler which produce a dummy data
---    If the machine is in a test mode, this function do nothing.
-handleEvent s (VtyEvent (V.EvKey (V.KChar 'd') []))
-  | not $ testmode s = continue s
-  | otherwise        = do
-          t <- liftIO Lib.currentTime
-          r <- liftIO ECU.dummyData807d
-          let f = ECU.parse r
-          continue $ s { 
-              rdat = (rdat s) {
-                  evnt = ( t,ECU.Tick r )
-                , gdat =  [ (engspeed,    ECU.engineSpeed  f )
-                          , (tposition,   ECU.ithrottlePot f )
-                          , (mapsensor,   ECU.mapSensor    f )
-                          , (battvoltage, ECU.ibattVoltage f )
-                          , (coolanttemp, ECU.coolantTemp  f )
-                          ]
-            , note    = "I have got dummy data" }
-            , dset    = take maxData $ rdat s : dset s
-            , lIacPos = Just $ ECU.idleACMP f 
-            , iCoolT  = case iCoolT s of
-                          Just _  -> iCoolT s
-                          Nothing -> Just $ ECU.coolantTemp f
-            }
---
-handleEvent s (VtyEvent (V.EvKey (V.KChar _) [])) = continue s
---
-handleEvent s (VtyEvent _ ) = continue s
---
+
