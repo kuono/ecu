@@ -28,6 +28,7 @@ executable ecu-exe
       ECU
       Lib
       UI
+      TextPlot
   hs-source-dirs:
       app
       src
