@@ -25,30 +25,9 @@ source-repository head
 executable ecu-exe
   main-is: Main.hs
   other-modules:
-      Common
-      Common.Types
       ECU
       Lib
-      TextPlot
-      Paths_ecu
-      System.Component
-      System.Component.Types
-      System.Component.Vendors.Rover.Mems
-      System.Component.Vendors.Rover.Mems.Types
-      System.Language.LogicControl
-      System.Hardware.Common
-      System.Hardware.Common.Types
-      System.Hardware.Controller
-      System.Hardware.Controller.Types
-      System.Hardware.Device
-      System.Hardware.Device.Types
-      System.Language.DeviceControl
-      System.Language.Hdl
-      System.Language.LogicControl
-      System.Language.LogicControl.Infrastructure
-      System.Types
       UI
-      UI.Types
   hs-source-dirs:
       app
       src
