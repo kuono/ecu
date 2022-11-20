@@ -95,6 +95,20 @@ localTimetoString (LocalTime n t) =
         byo'   = take 9 $ if byo >= 10 then showFixed False byo
                               else '0':showFixed False byo 
     in printf "%10s,%02d:%02d:%5s " hi ji hun byo'
-
+-- |
 ratio:: (Real a) => a -> a -> a -> Float 
 ratio ll ul v = fromRational ((toRational v - toRational ll ) / (toRational ul - toRational ll))
+-- |
+logFileName :: IO FilePath
+logFileName = do
+    time <- currentTime :: IO LocalTime
+    return $ localtimeToFilePath time
+    where localtimeToFilePath (LocalTime n t) =  -- to convert constant length string
+              let hi     = show n
+                  ji     = todHour t
+                  hun    = todMin  t 
+                  byo    = todSec  t
+                  byo'   = take 2 $ if byo >= 10 then showFixed False byo
+                                    else '0':showFixed False byo
+              in printf "ECULog%10s_%02d.%02d.%2s.csv" hi ji hun byo' -- ex. ECULog2018-10-15_17.27.26.csv
+              --  ./log/ECU...としていたが，ディレクトリが存在していないとランタイムエラーを起こすので変更
