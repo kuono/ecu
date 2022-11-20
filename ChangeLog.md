@@ -11,7 +11,17 @@
    3) 変換ケーブルのドライバをインストールすること（ただし最近のmacOSはFTDIチップ用のUSBシリアル変換器ドライバを内蔵している模様）。
  ちなみに魚野は FTDI Chips のUSBシリアル変換基盤を使用した変換ケーブルを自作したので，[FTDI Chips 社 製の VCP ドライバ](https://www.ftdichip.com/Drivers/VCP.htm) をインストールした。なお，最近のmacOSでは，インストールの途中，機能拡張がブロックされるので，セキュリティとプライバシーで実行を許可することが必要。
 
+## Architecture
+
+### v0
+
+[Fig 0. v0時点でのアーキテクチャ](./architecture-chart-v0.png)
+
 ## Change history
+
+### 0.16.1 2022.11.21
+
+- Linux で STM まわりのエラーが出ることに暫定対処（Loggerスレッドに例外を送ることで対応）
 
 ### 0.16.0 2022.11.12
 

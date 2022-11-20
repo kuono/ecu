@@ -35,6 +35,7 @@ executable ecu-exe
   ghc-options: -threaded -Wall -rtsopts -with-rtsopts=-N
   build-depends:
       array
+    , async
     , base >=4.7 && <5
     , brick
     , bytestring
