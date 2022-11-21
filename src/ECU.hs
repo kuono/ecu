@@ -1,7 +1,7 @@
 {- |
 * Module      : ECU
 * Description : Ecu Server and Communication Driver for Rover Mini MEMS
-* Copyright   : (c) Kentaro UONO, 2018-2021
+* Copyright   : (c) Kentaro UONO, 2018-2022
 * License     : MIT Licence
 * Maintainer  : info@kuono.net
 * Stability   : experimental
@@ -14,7 +14,9 @@
 module ECU where
 --
 import Lib ( currentTime, frameFmt )
+--
 import qualified Brick.BChan as BC
+--
 import qualified Data.ByteString.Char8 as BS
 import qualified Control.Exception as Ex
 import Control.Concurrent
@@ -47,10 +49,14 @@ import System.Random ( Random(randoms), newStdGen )
 import Text.Printf ( printf )
 -- 
 -- | ECU typical response type
-type Data807d = (BS.ByteString,BS.ByteString)
+type Data807d = ( BS.ByteString -- ^ raw response bytes for the ECU Command 0x80
+                , BS.ByteString -- ^ raw response bytes for the ECU Command 0x7d
+                )
 -- | Event 
-type Event     = (LocalTime, EvContents)
--- | ECU EventContents
+type Event    = ( LocalTime   -- ^ the time the event occurs
+                , EvContents  -- ^ the ECU event
+                )
+-- | ECU Events
 data EvContents
   = Tick Data807d
   | Done String
@@ -60,8 +66,6 @@ data EvContents
   | OffLined
   | Error String 
   deriving Eq
--- | ECU model and its identical data
--- type MemsID        = BS.ByteString
 -- | ECU Commands
 data UCommand      = Disconnect | Init | Get807d | ClearFaults | RunFuelPump | StopFuelPump 
                    | GetIACPos | IncIACPos | DecIACPos | IncIgAd | DecIgAd | TestActuator deriving (Eq,Show)
@@ -72,9 +76,9 @@ data Env  = Env
     { path  :: !FilePath          -- ^ device file path
     , port  :: !SerialPort        -- ^ ecu communication port
     , mne   :: !MNEModelData      -- ^ ecu model found on the communication port
-    , dch   :: BC.BChan ECU.Event -- ^ channel to inject original events for brick
+    , dch   :: BC.BChan Event     -- ^ channel to inject original events for brick
     , cch   :: TChan UCommand     -- ^ inlet channel to get user command for mems
-    , lch   :: TChan ECU.Event    -- ^ log channel to write logs
+    , lch   :: TChan Event        -- ^ log channel to write logs
     , tickt :: !ThreadId          -- ^ thread id
     }
 --
@@ -124,18 +128,23 @@ data Frame = Frame
     , closed_loop'  :: !Int  -- 0 : Open Loop, others : Closed Loop  
     , fuel_trim'    :: !Int  
     }
--- | MEMS Monad
-type MEMS  = ExceptT String (ReaderT Env IO) 
--- ^ ExceptT e m a = ExceptT ( m (Either e a))
---     MEMS a = ExceptT ( Reader Env IO  ( Either String a ) )
+--
+-- * MEMS Monad
+--
+-- | MEMS is a Monad
+--     ExceptT e m a = ExceptT ( m (Either e a))
 --     runExceptT :: ExceptT e m a -> m (Either e a)
 --     runReaderT :: ReaderT r m a -> r -> m a
--- --------------------------------------------------
+type MEMS  = ExceptT String (ReaderT Env IO) -- ^ MEMS a = ExceptT ( Reader Env IO  ( Either String a ) )
 --
 -- * ECU model section
 --
 -- | Model Data Set
-data MNEModelData = MNE { model :: MNEModel , longName :: !String , d8size :: !Int, d7size :: !Int } deriving (Eq,Show)
+data MNEModelData = MNE { model    :: MNEModel 
+                        , longName :: !String
+                        , d8size   :: !Int
+                        , d7size   :: !Int
+                        } deriving (Eq,Show)
 data MNEModel     = MNEUnknown | MNEAuto | MNE10078 | MNE101070 | MNE101170 deriving (Eq,Ord,Show)
 -- | for utility function
 type ModelId   = BS.ByteString
@@ -172,15 +181,15 @@ emptyD7d = BS.pack $ Prelude.map chr [0x20,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x
 -- * functions
 --
 -- | main function
-run :: ( FilePath       --  location path of USB serial interface
-       , BC.BChan ECU.Event --  OUT : Event Channel
-       , TChan UCommand --  IN  : User Command Channel 
-       , TChan ECU.Event   --  
-       ) -- ^ location path of USB serial I/F and the communication channels for the MEMS monitor
-  -> IO ()  -- ^  
-run e@(fp,bc,cc,ec) = Ex.bracket --  :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
+run :: ( FilePath       -- ^ location path of USB serial interface
+       , BC.BChan Event -- ^ OUT : Event Channel
+       , TChan UCommand -- ^ IN  : User Command Channel 
+       , TChan Event    -- ^ OUT : ECU Event to wirte log file
+       ) 
+  -> IO ()  
+run e@(_,bc,_,_) = Ex.bracket --  :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
   --  for resource acquisition ( opening )
-  (ECU.init e) --  IO (Either String Env)
+  (ECU.init e) --  ^ :: IO (Either String Env)
   -- for resource releasoe ( closing )
   (\case  
       Left err  -> do 
@@ -212,16 +221,6 @@ run e@(fp,bc,cc,ec) = Ex.bracket --  :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO
                                  -- type MEMS  = ExceptT String (ReaderT Env IO)
                                  --   e = String m = ReaderT Env IO 
                                  --  so runExceptT :: ExceptT String ReaderT Env IO a -> ReaderT (Either Env a )
-    -- `catch` 
-    --     \( e :: SomeException) -> do
-    --         e' <- ask
-    --         flush $ port e'
-    --         closeSerial $ port e'
-    --         t <- currentTime
-    --         let s = OffLined
-    --         BC.writeBChan (dch e') ( t , s )
-    --         killThread $ tickt e'  
-    --         return () 
         )
 --
 loop :: MEMS ()
@@ -281,7 +280,11 @@ res IncIgAd      = incIgAd
 res DecIgAd      = decIgAd
 res _            = get807d -- 未実装のコマンドは無視する
 -- | ecu 初期化関数　
-init ::(FilePath,BC.BChan ECU.Event ,TChan UCommand,TChan ECU.Event ) -- ^ デバイスパス，UIイベント・送信・受信各チャネル
+init ::( FilePath           -- ^ location path of USB serial interface
+       , BC.BChan ECU.Event -- ^ OUT : Event Channel
+       , TChan UCommand     -- ^ IN  : User Command Channel 
+       , TChan ECU.Event    -- ^ OUT : ECU Event to wirte log file
+       ) -- ^ デバイスパス，UIイベント・送信・受信各チャネル
      -> IO (Either String Env)
 init (f,dc,cc,lc)= do
     -- putStrLn "Initializing started."
@@ -356,16 +359,8 @@ get807d =  do
                   return $ Error "Error in getting 7d data. Empty Response."
               else
                   return $ Tick (r8',r7')
--- data LiveData = LiveData
---   { d80 :: !BS.ByteString  -- ^ latest response data of 0x80 command
---   , d7D :: !BS.ByteString  -- ^ as of 0x7D
---   , iac :: !Int            -- ^ latest iac position
---   , flt :: !(BS.ByteString,BS.ByteString)
---   }
 --
-
---
--- internal library
+-- * internal library
 --
 -- | ECU Commands
 type Command  = (Char,String) -- ^ ECU returns echo and one result byte. Command byte (send to ECU), Num of Response following bytes from ECU

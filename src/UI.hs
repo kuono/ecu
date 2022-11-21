@@ -229,12 +229,12 @@ handleEvent (VtyEvent (V.EvKey (V.KChar '1') [])) = do
 --         let ch = cchan s
 --         liftIO $ atomically $ writeTChan ch ECU.Disconnect
 --         continue s { rdat = (rdat s) { note = "I will disconnect mems."}}
--- handleEvent s (VtyEvent (V.EvKey (V.KChar '0') []))
---   | inmenu s && not (testmode s) = do
---         let ch = cchan s
---         liftIO $ atomically $ writeTChan ch ECU.ClearFaults
---         continue s { rdat = (rdat s) { note = "I will clear faults."}}
---   | otherwise = continue s { rdat = (rdat s) { note = "Got clear fault command but do nothing."}}
+handleEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = do
+  s <- get
+  t <- liftIO currentTime
+  let ch = cchan s
+  liftIO $ atomically $ writeTChan ch ECU.ClearFaults
+  put $ s { rdat = UI.DataSet { evnt = ( t, ECU.Done "Clear Faults command issued." ),  note = "I will clear faults."} }
 -- -- | 'p' -> Get IAC Position 
 -- -- handleEvent s (VtyEvent (V.EvKey (V.KChar 'p') []))
 -- --   | inmenu s && not (testmode s) = do
