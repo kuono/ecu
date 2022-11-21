@@ -8,6 +8,7 @@ Released under [the MIT license](https://opensource.org/licenses/mit-license.php
 
 ## Version history
 
+- 0.16.2   by K.UONO on 2022.11.21 logger thread related errors are fixed.
 - 0.16.0   by K.UONO on 2022.11.12 to adopt brick 1.*
 - 0.13.0   by K.UONO on 2022.01.30 UI arrange was changed.
 - 0.12.3   by K.UONO on 2021.11.01 bug fix
@@ -63,6 +64,7 @@ stack exec -- <bin_name> +RTS -p -hc -->
 
 ### 近日対応したい機能
 
+- eDSLによる処理の宣言化
 - 既存ログのビューア機能
 - ヘルプキー（ESCキー）を押した時にダイアログ表示
 - ポート値などをGUIを使って入力できるようにする
@@ -86,13 +88,13 @@ stack exec -- <bin_name> +RTS -p -hc -->
 ### 保留とする開発予定項目
 
 - conduit ライブラリを導入 <- 手段が目的になっている？
+- ThreePennyGUI を使い，現場で手持ちの iPhone や iPad からデータをリアルタイムで見られるようにする
+- ゲージUIを組み込む
+- cef3を組み込み，GUIを内在化
 
 ### 追加したい機能/解決したい問題点/課題
 
--- #   ThreePennyGUI を使い，現場で手持ちの iPhone や iPad からデータをリアルタイムで見られるようにする
--- #   ゲージUIを組み込む
 -- #   Raspberry Pi への稼働移行（タッチスクリーン・車載用ケース手配）
--- #   cef3を組み込み，GUIを内在化
 -- #   CUIとGUIを選べるようにする
 -- #   - 最大値・最小値を，直近10秒程度の範囲に変更する？
 

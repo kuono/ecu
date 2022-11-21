@@ -4,7 +4,7 @@ cabal-version: >= 1.8
 -- see: https://github.com/sol/hpack
 
 name:           ecu
-version:        0.16.0
+version:        0.16.2
 description:    Please see the README on GitHub at <https://github.com/kuono/ecu#readme>
 homepage:       https://github.com/kuono/ecu
 bug-reports:    https://github.com/kuono/ecu/issues
