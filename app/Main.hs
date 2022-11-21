@@ -26,7 +26,7 @@ import Brick ( customMain )
 import qualified Brick.BChan as BC
 import qualified Graphics.Vty as V
 -- * general purpose library
-import Control.Concurrent ( forkIO )
+import Control.Concurrent ( forkIO , throwTo )
 import Control.Concurrent.STM.TChan ( TChan, newTChan, writeTChan, readTChan )
 import Control.Exception as Ex ( catch, SomeException )
 import Control.Monad ( forever , when)
@@ -39,9 +39,7 @@ import System.IO ( Handle,IOMode(WriteMode),
       hClose, hFlush, hPutStr, hPutStrLn, withFile )
 import System.Process ( system ) -- for auto exiting on Raspberry Pi 
 import Text.Printf (printf)
-import Control.Exception.Base (throwIO)
 import Control.Exception (AsyncException(ThreadKilled))
-import Control.Concurrent (throwTo)
 --
 -- | Main action 主関数
 main :: IO ()
@@ -69,13 +67,16 @@ main = do
     _ <- forkIO $ forever $ ECU.run (path,evntCh,ucmdCh,logCh) -- ^ デバイスドライバの起動 
 
     finalState <- Brick.customMain iniVty buildVty (Just evntCh) UI.ecuMonitor iStatus
-
-    let cmdchan = UI.cchan finalState
-    atomically $ writeTChan cmdchan ECU.Disconnect   -- これで各スレッドは落としている 
-    throwTo logT ThreadKilled
     Prelude.putStrLn "Thank you for using Mini ECU Monitor. See you again!"
+
     -- killThread ecuT -- いきなり kill すると支障が出るか，要調査
     -- killThread logT -- = throw ecuT ThreadKilled <- hCloseしている
+    --
+    -- なんとも原始的なスレッド管理で，高位関数を使うよう改造予定
+    let cmdchan = UI.cchan finalState
+    atomically $ writeTChan cmdchan ECU.Disconnect   -- ^ これで ecu スレッドは落としている。
+    throwTo logT ThreadKilled                        -- ^ ロガースレッドはこちらで落としている。
+    --
     _ <- system $ if os /= Lib.RaspberryPiOS then
                     "echo \"\""  -- ":" is a command do nothing on bash
                   else
@@ -87,11 +88,12 @@ main = do
 --
 -- | logger 
 runlog :: TChan ECU.Event -> IO ()
-runlog ech = forever $ do
+runlog ech = forever $ do -- ^ forever を使っているので，何らかの例外があっても，スレッドは生き続ける？
   l <- Lib.logFileName :: IO FilePath
-  withFile l WriteMode $
+  withFile l WriteMode $ -- ^ bracket はかかっている。すなわち，例外がとんでくればファイルを閉じてはくれる。
     \h -> do
       hPutStrLn h  $ "Date,Time," ++ frameTitle
+      hFlush h
       loop h
     where loop :: Handle -> IO ()
           loop h = 
@@ -115,7 +117,8 @@ runlog ech = forever $ do
               when (e /= ECU.OffLined) $ loop h
             `Ex.catch`
               \e -> do
-                putStrLn $ "Exception " ++ show (e::Ex.SomeException) ++ "issued."
+                hPutStrLn h $ "Logger received Exception " ++ show (e::Ex.SomeException) ++ "."
+                hFlush h
                 hClose h  
 --
 logFileName :: IO FilePath
