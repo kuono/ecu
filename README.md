@@ -30,6 +30,8 @@ Released under [the MIT license](https://opensource.org/licenses/mit-license.php
 
 ## Basic usage <!-- 基本的な使い方 -->
 
+Ubuntuではttyのアクセス制限があるので，毎回 sudo chmod するか，設定ファイルを書き換える必要がある。
+
 You need a VT100 terminal because the App uses some Japanese fonts. 
 <!-- 画面出力に日本語フォントを使っているので，日本語対応の端末エミュレータが必要です。-->
     cabal update
