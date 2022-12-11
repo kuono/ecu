@@ -1,40 +1,13 @@
-name: Haskell CI
-
-on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
-
+on: [push]
+name: build
 jobs:
-  build:
-
-    runs-on: ubuntu-latest
-
+  runhaskell:
+    name: Hello World
+    runs-on: ubuntu-latest # or macOS-latest, or windows-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-haskell@v1
-      with:
-        ghc-version: '9.2.4'
-        cabal-version: '3.2'
-
-    - name: Cache
-      uses: actions/cache@v1
-      env:
-        cache-name: cache-cabal
-      with:
-        path: ~/.cabal
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}
-        restore-keys: |
-          ${{ runner.os }}-build-${{ env.cache-name }}-
-          ${{ runner.os }}-build-
-          ${{ runner.os }}-
-
-    - name: Install dependencies
-      run: |
-        cabal update
-        cabal build --only-dependencies --enable-benchmarks
-    - name: Build
-      run: cabal build --enable-benchmarks all
-    - name: Run tests
-      run: cabal test all
+      - uses: actions/checkout@v3
+      - uses: haskell/actions/setup@v2
+        with:
+          ghc-version: '9.2.4' # Resolves to the latest point release of GHC 8.8
+          cabal-version: '3.0.0.0' # Exact version of Cabal
+      - run: runhaskell Hello.hs
