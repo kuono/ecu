@@ -24,9 +24,9 @@ import qualified ECU
 import UI
     ( Status(after, cchan), initialState, ecuMonitor, frametoTable ) 
 
-import Control.Concurrent ( forkIO, forkFinally )
+import Control.Concurrent ( forkIO, throwTo )
 import Control.Concurrent.STM.TChan ( TChan, newTChan, writeTChan, readTChan )
-import Control.Exception as Ex ( catch, SomeException )
+import Control.Exception as Ex ( AsyncException(ThreadKilled) )
 import Control.Monad ( forever , when)
 import Control.Monad.STM ( atomically )
 import Data.Fixed ( showFixed )
@@ -35,20 +35,18 @@ import Data.Time
 import System.Environment ( getArgs, getEnv ) --,getEnvironment)
 import System.IO
     ( Handle,
-      hClose,
-      hFlush,
       hPutStr,
       hPutStrLn,
       withFile,
+      hFlush,
       IOMode(WriteMode) )
 import System.Process ( system ) -- for auto exiting on Raspberry Pi 
 import Text.Printf ( printf ) 
 
 import qualified Graphics.Vty as V
 --
---
 runlog :: TChan ECU.Event -> IO ()
-runlog ech = forever $ do
+runlog logch = do
   l <- logFileName :: IO FilePath
   withFile l WriteMode $
     \h -> do
@@ -58,26 +56,19 @@ runlog ech = forever $ do
           loop h = 
             do
               -- r <- System.DiskSpace.getAvailSpace l
-              (t,e) <- atomically $ readTChan ech
-              let j  = localTimetoString t
-              hPutStr h $ j ++ ","
-              hPutStr h $ case e of 
-                ECU.Tick r         -> frametoTable $ ECU.parse r
-                ECU.GotIACPos p    -> " Got IAC Pos    : " ++ show p
-                ECU.PortNotFound f -> " Port Not Found : " ++ f
-                ECU.Connected m    -> " Connected      : " ++ show (ECU.model m)
-                ECU.OffLined       -> " Off Lined. "
-                ECU.Done m         -> " Done           : " ++ show m
-                ECU.Error s        -> " Error          : " ++ s
+              (t,e) <- atomically $ readTChan logch
+              hPutStr h $ (localTimetoString t) ++ ","
               hPutStrLn h $ case e of 
-                ECU.Tick r -> show r
-                _          -> ""
+                ECU.Tick r         -> (frametoTable $ ECU.parse r ) ++ " : " ++ show r 
+                ECU.GotIACPos p    -> " Got IAC Pos    : " ++ show p
+                ECU.PortNotFound f -> " Port Not Found : " ++ f 
+                ECU.Connected m    -> " Connected      : " ++ show (ECU.model m) 
+                ECU.OffLined       -> " Off Lined. " 
+                ECU.Done m         -> " Done           : " ++ show m 
+                ECU.Error s        -> " Error          : " ++ s 
+                ECU.Quit           -> " Quit command issued."
               hFlush h
-              case e of
-                ECU.OffLined -> do  
-                                   putStrLn $ "Exception " ++ show (e::Ex.SomeException) ++ "issued."
-                                   hClose h  
-                _            -> loop h
+              when ( e /= ECU.Quit ) $ loop h
 --
 logFileName :: IO FilePath
 logFileName = do
@@ -98,26 +89,31 @@ main = do
     args <- System.Environment.getArgs
     envs <- System.Environment.getEnv "HOME"
     let buildVty = V.mkVty V.defaultConfig
-        (os, path,intestmode) = case (null args,envs == "/Users/kuono") of
-            (True,True) -> ( MacOS         , defaultUSBPathMac         , False )
-            (True,_   ) -> ( RaspberryPiOS , defaultUSBPathRaspberryPi , False )
-            _           -> if length args == 1 
-                               then ( os , head args , True )
+        ( os, path ) = case (null args,envs == "/Users/kuono") of
+            ( True,True ) -> ( MacOS         , defaultUSBPathMac         )
+            ( True,_    ) -> ( RaspberryPiOS , defaultUSBPathRaspberryPi )
+            _             -> if length args == 1 
+                               then ( os , head args )
                                else error "error: exactly one arguments needed."
     iniVty  <- buildVty    
     evntCh  <- BC.newBChan 10      :: IO (BC.BChan ECU.Event    )            
     ucmdCh  <- atomically newTChan :: IO (TChan    ECU.UCommand ) 
     logdCh  <- atomically newTChan :: IO (TChan    ECU.Event    )
 
+    logger  <- forkIO $ runlog logdCh 
+    ecu     <- forkIO $ ECU.run (path,evntCh,ucmdCh,logdCh) 
+
     iStatus <- initialState
     -- | ここの処理が原始的すぎ。
-    _ <- forkIO $ runlog logdCh 
-    _ <- forkIO $ forever $ ECU.run (path,evntCh,ucmdCh,logdCh) 
 
     finalState <- Brick.customMain iniVty buildVty (Just evntCh) ecuMonitor iStatus
 
-    let cmdchan = cchan finalState
-    _ <- atomically $ writeTChan cmdchan ECU.Disconnect   -- これで各スレッドは落としている 
+    -- | これらでログとecuドライバスレッドは落としている。
+    j <- currentTime
+    _ <- atomically $ writeTChan ucmdCh ECU.Kill 
+    _ <- atomically $ writeTChan logdCh (j,ECU.Quit )
+    -- throwTo ecu ThreadKilled     
+    -- throwTo logger ThreadKilled  
 
     Prelude.putStrLn "Thank you for using Mini ECU Monitor. See you again!"
     -- killThread ecuT -- いきなり kill すると支障が出るか，要調査
