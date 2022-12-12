@@ -52,18 +52,20 @@ type Data807d = (BS.ByteString,BS.ByteString)
 type Event     = (LocalTime, EvContents)
 -- | ECU EventContents
 data EvContents
-  = Tick Data807d
+  = Dummy Data807d
+  | Tick Data807d
   | Done String
   | GotIACPos Int
   | PortNotFound FilePath
   | Connected MNEModelData
   | OffLined
   | Error String 
-  deriving Eq
+  | Quit
+  deriving (Eq , Show)
 -- | ECU model and its identical data
 -- type MemsID        = BS.ByteString
 -- | ECU Commands
-data UCommand      = Disconnect | Init | Get807d | ClearFaults | RunFuelPump | StopFuelPump 
+data UCommand      = Kill | Disconnect | Init | Get807d | GetDummy807d | ClearFaults | RunFuelPump | StopFuelPump 
                    | GetIACPos | IncIACPos | DecIACPos | IncIgAd | DecIgAd | TestActuator deriving (Eq,Show)
 -- type RData         = Rover.Data807D
 --
@@ -187,10 +189,8 @@ run e@(fp,bc,cc,ec) = Ex.bracket --  :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO
         --   run e
           t <- Lib.currentTime
           BC.writeBChan bc ( t, Error err)
-          atomically $ writeTChan ec ( t, Error err )
-          -- run e
-          -- return () -- 
-          fail "Some error occured while running ecu."
+          atomically $ writeTChan ec ( t, Error ( "When doing initialization. " ++ err ))
+          return () 
       Right env -> do
           flush $ port env
           closeSerial $ port env
@@ -198,16 +198,16 @@ run e@(fp,bc,cc,ec) = Ex.bracket --  :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO
           let s = OffLined
           BC.writeBChan (dch env) ( t , s )
           atomically $ writeTChan ec (t,s)
-          killThread $ tickt env
+          -- Ex.throwTo (tickt env) Ex.ThreadKilled
           return ()
       )
   -- for using resources
   (\case      -- :: Maybe Env
       Left  err -> do
           t <- Lib.currentTime
-          putStrLn "ECU Initialization Failed."
-          BC.writeBChan bc ( t, Error $ "ECU Initialization failed." ++ err )
-          return ()
+          BC.writeBChan bc ( t, Error $ "ECU Initialization failed. " ++ err )
+          atomically $ writeTChan ec ( t, Error $ "ECU Initialization failed." ++ err )
+          -- return ()
       Right env -> do            -- start loop
           threadDelay 10000      -- threadDelay inserted on 10th April 2020 for testing wether or not having 
           _ <- runReaderT (runExceptT loop) env  -- effect to continuous connection for inital usstable term. K.UONO
@@ -274,6 +274,7 @@ report c = do
 res :: UCommand -> MEMS EvContents
 res Init         = get807d -- ignore init command while engine is running
 res Get807d      = get807d -- tick
+res GetDummy807d = getDummyData'
 res Disconnect   = offline
 res ClearFaults  = clearFaults
 res RunFuelPump  = runFuelPump
@@ -294,11 +295,10 @@ init (f,dc,cc,lc)= do
     j <- Lib.currentTime
     if not exist 
         then do
-            BC.writeBChan dc (j,PortNotFound f)
-            atomically $ writeTChan lc ( j, PortNotFound f )
-            -- atomically $ writeTChan lc (j,PortNotFound f) 未接続時にログが巨大化するためコメントアウト
+            report (j,PortNotFound f)
             return $ Left "Port Not Found."
         else do
+            report (j,Done $ "Found Port at " ++ f )
             sp   <- openSerial f defaultSerialSettings { commSpeed = CS9600, timeout= 1, flowControl = Software }
             --
             _    <- send sp $ BS.singleton (chr 0xca)  -- 202 'ha no hankaku' 
@@ -317,12 +317,10 @@ init (f,dc,cc,lc)= do
                 then do -- in case of illegullar response
                     closeSerial sp -- 2021.11.01 bug fixed
                     j' <- Lib.currentTime
-                    BC.writeBChan dc (j', Error "Initialization Response Fault")
+                    report (j', Error "Initialization Response Fault." )
                     return $ Left "Initialization Response Fault." 
                 else do
-                    tt <- forkIO $ forever $ do -- 定期的にデータ送付を命令するループスレッドを立ち上げる
-                        atomically $ writeTChan cc Get807d
-                        threadDelay 400000 {- firing get807d frequency : every 0.4 sec -}
+                    tt <- forkIO $ tickThread cc -- 定期的にデータ送付を命令するループスレッドを立ち上げる
                     let theModel = M.lookup modelIdBytes mneModels  -- look up ECU model with identity 4 bytes
                     -- prepare to return model data
                     -- data ModelDataSet  = ModelDataSet { mne :: MemsID , name :: !String , d8size :: !Int, d7size :: !Int} deriving Eq
@@ -336,10 +334,24 @@ init (f,dc,cc,lc)= do
                                         _            -> (28,14)
                             return $ MNE { model = MNEUnknown , longName = "Unknown ( " ++ show d8l ++ ":" ++ show d7l ++ ")" ,d8size = d8l,d7size = d7l}
                         Just actualModel -> return actualModel -- $ MNE { model = md' , longName = longName md' ++ "(" ++ show (d8size md') ++ ":" ++ show (d7size md') ++ ")" } 
-                    BC.writeBChan dc ( j,Connected md )
-                    atomically $ writeTChan lc ( j,Connected md )
+                    report ( j,Connected md )
                     -- atomically $ writeTChan cc GetIACPos -- ^ 2020.01.11 追記
                     return $ Right Env { path = f, port = sp, mne = md, dch = dc , cch = cc , lch = lc , tickt = tt } 
+    where
+      report :: Event -> IO ()
+      report e = do
+        BC.writeBChan dc e
+        atomically $ writeTChan lc e
+--
+tickThread :: TChan UCommand -> IO ()
+tickThread cc = forever $ do
+                      atomically $ writeTChan cc Get807d
+                      threadDelay 400000 {- firing get807d frequency : every 0.4 sec -}
+
+getDummyData' :: MEMS EvContents
+getDummyData' = do
+  r <- liftIO ECU.dummyData807d
+  return $ Dummy r
 --
 get807d :: MEMS EvContents
 get807d =  do
@@ -615,7 +627,7 @@ tryIO ::    Int              -- ^ number of times to try to do the action
          -> IO BS.ByteString -- ^ the action which returns BS.empty when error occured
          -> IO (Either String BS.ByteString) 
 tryIO n a -- try n times action
-  | n <= 0    = return $ Left "The challenge of getting data failed"
+  | n <= 0    = return $ Left "The challenge of getting data failed. "
   | otherwise = do
       r <- a 
       if r == BS.empty then do

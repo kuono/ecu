@@ -88,7 +88,7 @@ data Status = Status
     , dset     :: [UI.DataSet]       -- ^ dset   : 直前までのデータセット（最大 maxData個）
     , echan    :: BC.BChan ECU.Event -- ^ echan  : Brickのイベントをやりとりするチャンネル
     , cchan    :: TChan ECU.UCommand -- ^ cchan  : ECUにコマンドを送り込むチャンネル
-    , lchan    :: TChan ECU.Event    -- ^ lchan  : 
+    , lchan    :: TChan ECU.Event    -- ^ lchan  : ログ書き込み用チャネル
     , inmenu   :: !Bool              -- ^ inmenu : 
     , after    :: !AfterAction       -- ^ shutdown :: whether or not shutdown system after quit this app
     , menu     :: !MenuItem
@@ -183,6 +183,20 @@ handleEvent (AppEvent (_,ECU.OffLined)) = do
   put $ s { after = Restart }
 --  halt
 --  
+handleEvent (AppEvent (t,ECU.Dummy r)) = do
+  s <- get
+  let f = ECU.parse r
+  put $ s 
+      { rdat = DataSet
+          { evnt = ( t,ECU.Dummy r )
+          , note = "Got Dummy Data"
+          }
+      , dset    = take maxData $ rdat s : dset s
+      , lIacPos = Just $ ECU.idleACMP f
+      , iCoolT  = case iCoolT s of
+          Just _  -> iCoolT s
+          Nothing -> Just $ ECU.coolantTemp f  
+      }
 handleEvent (AppEvent (t,ECU.Tick r)) = do
   s <- get
   let f = ECU.parse r
@@ -207,10 +221,15 @@ handleEvent (AppEvent (t,ECU.Tick r)) = do
 --
 -- * Event Handlers as a part of UI
 --
-handleEvent (VtyEvent (V.EvKey (V.KChar 'q') [])) = do { s <- get ; put $ s { after = Quit } ; halt }
+handleEvent (VtyEvent (V.EvKey (V.KChar 'q') [])) = do
+  s <- get
+  j <- liftIO currentTime
+  _ <- liftIO $ atomically $ writeTChan (lchan s) (j,ECU.Quit)
+  put $ s { after = Quit }
+  halt
 handleEvent (VtyEvent (V.EvKey (V.KChar 'r') [])) = do { s <- get ; put $ s { after = Restart } ; halt }
 handleEvent (VtyEvent (V.EvKey (V.KChar 's') [])) = do { s <- get ; put $ s { after = Shutdown } ; halt }
-handleEvent (VtyEvent (V.EvKey V.KEsc [])) = do
+handleEvent (VtyEvent (V.EvKey  V.KEsc       [])) = do
   s <- get
   put $ s { mode = if mode s == UI.Loop then UI.Line else Loop }
 handleEvent (VtyEvent (V.EvKey (V.KChar '1') [])) = do
@@ -232,8 +251,7 @@ handleEvent (VtyEvent (V.EvKey (V.KChar '1') [])) = do
 handleEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = do
   s <- get
   t <- liftIO currentTime
-  let ch = cchan s
-  liftIO $ atomically $ writeTChan ch ECU.ClearFaults
+  liftIO $ atomically $ writeTChan (cchan s) ECU.ClearFaults
   put $ s { rdat = UI.DataSet { evnt = ( t, ECU.Done "Clear Faults command issued." ),  note = "I will clear faults."} }
 -- -- | 'p' -> Get IAC Position 
 -- -- handleEvent s (VtyEvent (V.EvKey (V.KChar 'p') []))
@@ -272,25 +290,10 @@ handleEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = do
 -- --    If the machine is in a test mode, this function do nothing.
 handleEvent (VtyEvent (V.EvKey (V.KChar 'd') [])) = do
   s <- get
-  t <- liftIO currentTime
-  r <- liftIO ECU.dummyData807d
-  let f = ECU.parse r
-  put $ s { 
-              rdat = UI.DataSet {
-                  evnt = ( t,ECU.Tick r )
-                , note    = "I have got dummy data" }
-                -- , gdat =  [ (engspeed,    ECU.engineSpeed  f )
-                --           , (tposition,   ECU.ithrottlePot f )
-                --           , (mapsensor,   ECU.mapSensor    f )
-                --           , (battvoltage, ECU.ibattVoltage f )
-                --           , (coolanttemp, ECU.coolantTemp  f )
-                --           ]
-            , dset    = take maxData $ rdat s : dset s
-            , lIacPos = Just $ ECU.idleACMP f 
-            , iCoolT  = case iCoolT s of
-                          Just _  -> iCoolT s
-                          Nothing -> Just $ ECU.coolantTemp f
-            }
+  liftIO $ atomically $ writeTChan (cchan s) ECU.GetDummy807d
+  s' <- liftIO $ getDummyStatus s
+  put s'
+  -- $ s { rdat = UI.DataSet { evnt = ( t, ECU.GetDummy807d ),  note = "I will get dummy data."} }
 --
 -- handleEvent s (VtyEvent (V.EvKey (V.KChar _) [])) = continue s
 -- --
@@ -409,15 +412,17 @@ drawNote s = str . note $ rdat s
 drawEcuStatus :: Status -> Widget Name
 drawEcuStatus s = viewport StatusPane Horizontal $ hLimit 30 $
   case event s of
-    ECU.PortNotFound f -> withAttr errorAttr  $ str (" Port Not Found :" ++ f ) <+> B.vBorder
-    ECU.Connected _    -> withAttr normalAttr $ str (" Connected. " ++ show (model s) ++ "(" ++ show (ECU.d80size $ frameData s) ++ "," ++ show (ECU.d7dsize $ frameData s) ++ ")") <+> B.vBorder
-    ECU.OffLined       -> withAttr alertAttr  $ str " Off Line                      " <+> B.vBorder
+    ECU.PortNotFound f -> withAttr errorAttr  $ str (" Port Not Found :" ++ f )
+    ECU.Connected _    -> withAttr normalAttr $ str (" Connected. " ++ show (model s) ++ "(" ++ show (ECU.d80size $ frameData s) ++ "," ++ show (ECU.d7dsize $ frameData s) ++ ")")
+    ECU.OffLined       -> withAttr alertAttr  $ str " Off Line                      "
     ECU.Tick _         ->
       withAttr  (if True then normalAttr else alertAttr)
-       $ str (" Connected. " ++ show ( model s ) ++ "(" ++ show  ( ECU.d80size (frameData s)) ++ "," ++ show (ECU.d7dsize ( frameData s )) ++ ")") <+> B.vBorder
-    ECU.GotIACPos _    -> withAttr normalAttr $ str (" Connected. " ++ show (model s) ++ "(" ++ show (ECU.d80size $ frameData s) ++ "," ++ show (ECU.d7dsize $ frameData s) ++ ")") <+> B.vBorder
-    ECU.Error m        -> withAttr errorAttr  $ str (" Error             : " ++ m ) <+> B.vBorder
+       $ str (" Connected. " ++ show ( model s ) ++ "(" ++ show  ( ECU.d80size (frameData s)) ++ "," ++ show (ECU.d7dsize ( frameData s )) ++ ")")
+    ECU.Dummy _        -> withAttr alertAttr  $ str (" Dummy")  
+    ECU.GotIACPos _    -> withAttr normalAttr $ str (" Connected. " ++ show (model s) ++ "(" ++ show (ECU.d80size $ frameData s) ++ "," ++ show (ECU.d7dsize $ frameData s) ++ ")")
+    ECU.Error m        -> withAttr errorAttr  $ str (" Error             : " ++ m )
     _                  -> emptyWidget
+   <+> B.vBorder
 --
 drawEcuErrorContents :: Status -> Widget Name
 drawEcuErrorContents s = viewport ErrorContentsPane Horizontal $
@@ -562,12 +567,14 @@ drawGraph' s = viewport GraphPane Both $
         hBarCh mind maxd f ds = case snd $ evnt ds of
           -- Initialized _  -> 'i'
           -- ECU.LiveData _     -> '*'
+          ECU.Quit           -> 'q'
           ECU.Done _         -> 'G'
           ECU.GotIACPos _    -> 'C'
           ECU.Error _        -> 'E'
           ECU.PortNotFound _ -> 'x'
           ECU.Connected _    -> '+'
           ECU.OffLined       -> '-'
+          ECU.Dummy _        -> 'D'
           ECU.Tick r         -> let d = f $ ECU.parse r in case  (d < mind, maxd < d) of
             (True, _   ) -> 'L'
             (_,True    ) -> 'U'
