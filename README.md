@@ -170,6 +170,7 @@ stack exec -- <bin_name> +RTS -p -hc -->
 
 ### ECUから返ってくるデータの意味
 
+```haskell 
 data Frame80  = Frame80 {
         size_80     :: Int , -- 0x00   Size of data frame, including this byte. This should be 0x1C (28 bytes) for the frame described here.
         engineSpeed :: Int , -- 0x01-2 Engine speed in RPM (16 bits)
@@ -201,6 +202,7 @@ data Frame80  = Frame80 {
         unknown1A   :: Word8,-- 0x1A    Unknown
         unknown1B   :: Word8 -- 0x1B    Unknown
     } deriving Show
+```
 
 ### 各種センサーの役割や信号の意味
 
@@ -357,3 +359,35 @@ low resistance = rich condition, high resistance = lean condition
     -- MNE101361 Automatic	SPI - Air Con - Except UK - 1996 on	134455 - 	 
     
     -- ^ original number for size of Frame 7d = 32
+
+# Haskell でアクターモデルプログラミング
+
+## メッセージはバイナリ文字列
+
+この方法の問題点は文字列のやりとりで効率が悪いこと
+
+
+## Async 型
+
+forkするかわりに，Msg タイプのメッセージ出入力用の``Tchan``を得る。
+
+この方法の問題点は，チャネルの中身の肩を型プログラミングで拾わなければならないこと。
+```haskell
+data Async put get = Async ThreadId ( TChan put , TChan get )
+--
+async :: ( put , get ) -> ( put -> IO () ) -> IO Async put get 
+async ch@(put, get) act = do
+  p <- createTChan ( Type of put )
+  g <- createTChan ( Type of get )
+  i <- fork $ do loop 
+         where loop = mask $ \unmask -> do
+                        msg <- readTChan p -- wait here
+                        result <- unmask $ act msg
+                        writeTChan g result
+                        loop
+  return ( p , g)
+```
+-
+
+
+    
