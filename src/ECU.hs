@@ -1,7 +1,7 @@
 {- |
 * Module      : ECU
 * Description : Ecu Server and Communication Driver for Rover Mini MEMS
-* Copyright   : (c) Kentaro UONO, 2018-2021
+* Copyright   : (c) Kentaro UONO, 2018-2022
 * License     : MIT Licence
 * Maintainer  : info@kuono.net
 * Stability   : experimental
@@ -18,17 +18,18 @@ import qualified Brick.BChan as BC
 import qualified Data.ByteString.Char8 as BS
 import qualified Control.Exception as Ex
 import Control.Concurrent
-    ( ThreadId, threadDelay, forkIO, killThread )
+    ( ThreadId, threadDelay, forkIO )
 import Control.Concurrent.STM.TChan
     ( readTChan, tryReadTChan, writeTChan, TChan )
-import Control.Monad ( forever ) 
+import Control.Monad ( forever )
+-- import Control.Monad.Free.Church  
 import Control.Monad.IO.Class ( MonadIO(liftIO) )
 import Control.Monad.STM ( atomically ) 
 import Control.Monad.Trans.Class ( MonadTrans(lift) )
 import Control.Monad.Trans.Except ( ExceptT, runExceptT )
 import Control.Monad.Trans.Reader ( ReaderT(runReaderT), ask )
 import Data.Bits ( Bits(testBit) )
-import Data.Char ( ord, chr )
+import Data.Char ( ord, chr) -- , GeneralCategory (InitialQuote) )
 import Data.Map as M ( Map, fromList, lookup )
 import Data.Time ( LocalTime )
 import System.Hardware.Serialport
@@ -45,30 +46,76 @@ import System.Hardware.Serialport
 import System.Directory ( doesFileExist ) 
 import System.Random ( Random(randoms), newStdGen )
 import Text.Printf ( printf )
--- 
+--
+-- * Free eDSL
+--
+-- ecu <- connect '/dev/ttyUSB0' Loop
+-- outcome <- getStream ecu
+-- disconnect ecu
+--
+-- data Status   = PortNotFound FilePath | ConnectionLost | Connected Handle | Disconnected 
+-- data ECU      = ECU Status
+-- type Response = Either Error ( TChan Event )
+-- data Method next
+--   = Connect    FilePath Mode ( TChan Command ) ( Connection  -> next )
+--   | Disconnect ECU                             ( ()          -> next ) 
+--   | GetStatus  ECU                             ( Status      -> next )
+-- type Script a = F Method a
+-- instance Functor Method where
+--   fmap f ( Connect   p        next ) = Connect   p        ( f . next )
+--   fmap f ( SetMode   ecu mode next ) = SetMode   ecu mode ( f . next )
+--   fmap f ( GetStream ecu      next ) = GetStream ecu      ( f . next )  
+--   fmap f ( GetStatus ecu      next ) = GetStatus ecu      ( f . next )
+-- --
+-- -- * smart functions
+-- --
+-- connect :: FilePath -> Script ECU
+-- connect fp = F ( Connect fp Pure )
+-- disconnect :: ECU -> Script ()
+-- disconnect ecu = F ( Disconnect ecu Pure )
+-- setMode :: ECU -> LoopLine -> Script ()
+-- setMode ecu mode = F ( SetMode ecu mode Pure )
+-- getStream :: ECU -> Script ( TChan Event)
+-- getStream ecu = F ( GetChan ecu Pure )
+-- getStatus :: ECU -> Script Status
+-- getStatus ecu = F ( GetStatus ecu Pure )
+--
 -- | ECU typical response type
 type Data807d = (BS.ByteString,BS.ByteString)
 -- | Event 
 type Event     = (LocalTime, EvContents)
+-- | Mode
+
+data LoopLine = Loop | Line
 -- | ECU EventContents
 data EvContents
-  = Dummy Data807d
-  | Tick Data807d
-  | Done String
+  = -- Mode LoopLine
+    Connected MNEModelData
+  | Disconnected
+  | Tick' (BS.ByteString,BS.ByteString)
+  | Got807d Data807d
+  | GotDummy807d Data807d
   | GotIACPos Int
   | PortNotFound FilePath
-  | Connected MNEModelData
   | OffLined
+  | Done String
   | Error String 
-  | Quit
   deriving (Eq , Show)
--- | ECU model and its identical data
--- type MemsID        = BS.ByteString
 -- | ECU Commands
-data UCommand      = Kill | Disconnect | Init | Get807d | GetDummy807d | ClearFaults | RunFuelPump | StopFuelPump 
-                   | GetIACPos | IncIACPos | DecIACPos | IncIgAd | DecIgAd | TestActuator deriving (Eq,Show)
--- type RData         = Rover.Data807D
---
+data UCommand = 
+    -- = SetMode LoopLine -- ^ set mode to loop or line
+    --  Connect      -- ^ initialize ECU and start communication
+      Init
+    | Disconnect   -- ^ close ECU connection
+    | Quit
+    | Get807d      -- ^ issue 0x80 & 0x7d to get some information
+    | GetDummy807d -- ^ get dummy 0x80 & 0x7d data for Test
+    | ClearFaults  -- ^ clear fault status of ECU
+    | RunFuelPump | StopFuelPump
+    | GetIACPos | IncIACPos | DecIACPos
+    | IncIgAd | DecIgAd
+    -- | TestActuator 
+    deriving (Eq,Show)
 -- | MEMS Monad related
 data Env  = Env 
     { path  :: !FilePath          -- ^ device file path
@@ -173,25 +220,29 @@ emptyD7d = BS.pack $ Prelude.map chr [0x20,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x
 --
 -- * functions
 --
+data NextAction = Continue | Stop deriving Eq 
 -- | main function
 run :: ( FilePath       --  location path of USB serial interface
        , BC.BChan ECU.Event --  OUT : Event Channel
        , TChan UCommand --  IN  : User Command Channel 
-       , TChan ECU.Event   --  
+       , TChan ECU.Event   -- OUT :  
        ) -- ^ location path of USB serial I/F and the communication channels for the MEMS monitor
   -> IO ()  -- ^  
-run e@(fp,bc,cc,ec) = Ex.bracket --  :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
-  --  for resource acquisition ( opening )
-  (ECU.init e) --  IO (Either String Env)
+run e@(_,bc,_,ec) = forever process
+--   run e -- 初期化に失敗していない限り継続
+  where
+    process :: IO NextAction
+    process = Ex.bracket --  :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO c	 -}
+      -- | for resource acquisition ( opening )
+      (ECU.init e) --  IO (Either String Env)
   -- for resource releasoe ( closing )
-  (\case  
-      Left err  -> do 
-        --   run e
-          t <- Lib.currentTime
-          BC.writeBChan bc ( t, Error err)
-          atomically $ writeTChan ec ( t, Error ( "When doing initialization. " ++ err ))
-          return () 
-      Right env -> do
+      (\case  
+        Left err  -> do 
+            t <- Lib.currentTime
+            BC.writeBChan bc ( t, Error err)
+            -- atomically $ writeTChan ec ( t, Error ( "When doing initialization. " ++ err ))
+            return ()
+        Right env -> do
           flush $ port env
           closeSerial $ port env
           t <- Lib.currentTime
@@ -201,17 +252,17 @@ run e@(fp,bc,cc,ec) = Ex.bracket --  :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO
           -- Ex.throwTo (tickt env) Ex.ThreadKilled
           return ()
       )
-  -- for using resources
-  (\case      -- :: Maybe Env
-      Left  err -> do
-          t <- Lib.currentTime
-          BC.writeBChan bc ( t, Error $ "ECU Initialization failed. " ++ err )
-          atomically $ writeTChan ec ( t, Error $ "ECU Initialization failed." ++ err )
-          -- return ()
-      Right env -> do            -- start loop
-          threadDelay 10000      -- threadDelay inserted on 10th April 2020 for testing wether or not having 
-          _ <- runReaderT (runExceptT loop) env  -- effect to continuous connection for inital usstable term. K.UONO
-          return ()              -- this line will be never executed. 
+      -- | for using resources
+      (\case      -- :: Maybe Env
+          Left  err -> do
+            t <- Lib.currentTime
+            BC.writeBChan bc ( t, Error $ "ECU Initialization failed. " ++ err )
+            atomically $ writeTChan ec ( t, Error $ "ECU Initialization failed." ++ err )
+            return Stop
+          Right env -> do            -- start loop
+            threadDelay 10000      -- threadDelay inserted on 10th April 2020 for testing wether or not having 
+            _ <- runReaderT (runExceptT loop) env  -- effect to continuous connection for inital usstable term. K.UONO
+            return Continue              -- this line will be never executed. 
                                  -- runExceptT :: ExceptT e m a -> m (Either e a)
                                  -- type MEMS  = ExceptT String (ReaderT Env IO)
                                  --   e = String m = ReaderT Env IO 
@@ -226,7 +277,7 @@ run e@(fp,bc,cc,ec) = Ex.bracket --  :: IO a	-> (a -> IO b) -> (a -> IO c)	-> IO
     --         BC.writeBChan (dch e') ( t , s )
     --         killThread $ tickt e'  
     --         return () 
-        )
+         )
 --
 loop :: MEMS ()
 loop = do
@@ -272,10 +323,10 @@ report c = do
 --
 -- | User Command achievement functions
 res :: UCommand -> MEMS EvContents
-res Init         = get807d -- ignore init command while engine is running
+-- res Init         = get807d -- ignore init command while engine is running
 res Get807d      = get807d -- tick
 res GetDummy807d = getDummyData'
-res Disconnect   = offline
+-- res Disconnect   = offline
 res ClearFaults  = clearFaults
 res RunFuelPump  = runFuelPump
 res StopFuelPump = stopFuelPump
@@ -295,10 +346,10 @@ init (f,dc,cc,lc)= do
     j <- Lib.currentTime
     if not exist 
         then do
-            report (j,PortNotFound f)
+            reportData (j,PortNotFound f)
             return $ Left "Port Not Found."
         else do
-            report (j,Done $ "Found Port at " ++ f )
+            reportData (j,Done $ "Found Port at " ++ f )
             sp   <- openSerial f defaultSerialSettings { commSpeed = CS9600, timeout= 1, flowControl = Software }
             --
             _    <- send sp $ BS.singleton (chr 0xca)  -- 202 'ha no hankaku' 
@@ -317,7 +368,7 @@ init (f,dc,cc,lc)= do
                 then do -- in case of illegullar response
                     closeSerial sp -- 2021.11.01 bug fixed
                     j' <- Lib.currentTime
-                    report (j', Error "Initialization Response Fault." )
+                    reportData (j', Error "Initialization Response Fault." )
                     return $ Left "Initialization Response Fault." 
                 else do
                     tt <- forkIO $ tickThread cc -- 定期的にデータ送付を命令するループスレッドを立ち上げる
@@ -330,16 +381,16 @@ init (f,dc,cc,lc)= do
                             let (d8l,d7l) = case test of
                                     Left  _  -> (28,14)
                                     Right e' -> case e' of
-                                        Tick (d8,d7) -> (ord $ BS.index d8 0,ord $ BS.index d7 0)
+                                        Tick' (d8,d7) -> (ord $ BS.index d8 0,ord $ BS.index d7 0)
                                         _            -> (28,14)
                             return $ MNE { model = MNEUnknown , longName = "Unknown ( " ++ show d8l ++ ":" ++ show d7l ++ ")" ,d8size = d8l,d7size = d7l}
                         Just actualModel -> return actualModel -- $ MNE { model = md' , longName = longName md' ++ "(" ++ show (d8size md') ++ ":" ++ show (d7size md') ++ ")" } 
-                    report ( j,Connected md )
+                    reportData ( j,Connected md )
                     -- atomically $ writeTChan cc GetIACPos -- ^ 2020.01.11 追記
                     return $ Right Env { path = f, port = sp, mne = md, dch = dc , cch = cc , lch = lc , tickt = tt } 
     where
-      report :: Event -> IO ()
-      report e = do
+      reportData :: Event -> IO ()
+      reportData e = do
         BC.writeBChan dc e
         atomically $ writeTChan lc e
 --
@@ -351,7 +402,7 @@ tickThread cc = forever $ do
 getDummyData' :: MEMS EvContents
 getDummyData' = do
   r <- liftIO ECU.dummyData807d
-  return $ Dummy r
+  return $ GotDummy807d r
 --
 get807d :: MEMS EvContents
 get807d =  do
@@ -372,7 +423,7 @@ get807d =  do
                   liftIO $ flush $ port e -- 取りこぼし対策。
                   return $ Error "Error in getting 7d data. Empty Response."
               else
-                  return $ Tick (r8',r7')
+                  return $ Tick' (r8',r7')
 -- data LiveData = LiveData
 --   { d80 :: !BS.ByteString  -- ^ latest response data of 0x80 command
 --   , d7D :: !BS.ByteString  -- ^ as of 0x7D
@@ -695,4 +746,3 @@ frametoTable f =
       (ECU.lambda_voltage f) -- :: Int
       (ECU.closed_loop'   f) -- :: Int
       (ECU.fuel_trim'     f) -- :: Int 
-
