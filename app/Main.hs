@@ -22,12 +22,12 @@ import Brick ( customMain )
 import qualified Brick.BChan as BC
 import qualified ECU
 import UI
-    ( Status(after, cchan), initialState, ecuMonitor, frametoTable ) 
+    ( Status(after), initialState, ecuMonitor, frametoTable ) 
 
-import Control.Concurrent ( forkIO, throwTo )
+import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM.TChan ( TChan, newTChan, writeTChan, readTChan )
 import Control.Exception as Ex ( AsyncException(ThreadKilled) )
-import Control.Monad ( forever , when)
+import Control.Monad ( forever )
 import Control.Monad.STM ( atomically )
 import Data.Fixed ( showFixed )
 import Data.Time
@@ -44,6 +44,7 @@ import System.Process ( system ) -- for auto exiting on Raspberry Pi
 import Text.Printf ( printf ) 
 
 import qualified Graphics.Vty as V
+import Control.Exception (throwTo)
 --
 runlog :: TChan ECU.Event -> IO ()
 runlog logch = do
@@ -53,22 +54,25 @@ runlog logch = do
       hPutStrLn h  $ "Date,Time," ++ frameTitle
       loop h
     where loop :: Handle -> IO ()
-          loop h = 
+          loop h = forever $ 
             do
               -- r <- System.DiskSpace.getAvailSpace l
               (t,e) <- atomically $ readTChan logch
-              hPutStr h $ (localTimetoString t) ++ ","
+              hPutStr h $ localTimetoString t ++ ","
               hPutStrLn h $ case e of 
-                ECU.Tick r         -> (frametoTable $ ECU.parse r ) ++ " : " ++ show r 
+                ECU.Tick' r        -> frametoTable ( ECU.parse r ) ++ " : " ++ show r 
                 ECU.GotIACPos p    -> " Got IAC Pos    : " ++ show p
                 ECU.PortNotFound f -> " Port Not Found : " ++ f 
                 ECU.Connected m    -> " Connected      : " ++ show (ECU.model m) 
                 ECU.OffLined       -> " Off Lined. " 
                 ECU.Done m         -> " Done           : " ++ show m 
                 ECU.Error s        -> " Error          : " ++ s 
-                ECU.Quit           -> " Quit command issued."
+                -- ECU.Quit           -> " Quit command issued."
+                ECU.Disconnected   -> " Disconnectted."
+                ECU.Got807d r      -> frametoTable ( ECU.parse r ) ++ " : " ++ show r
+                ECU.GotDummy807d r -> frametoTable ( ECU.parse r ) ++ " : " ++ show r
               hFlush h
-              when ( e /= ECU.Quit ) $ loop h
+              -- when ( e /= ECU.Quit ) $ loop h
 --
 logFileName :: IO FilePath
 logFileName = do
@@ -109,11 +113,11 @@ main = do
     finalState <- Brick.customMain iniVty buildVty (Just evntCh) ecuMonitor iStatus
 
     -- | これらでログとecuドライバスレッドは落としている。
-    j <- currentTime
-    _ <- atomically $ writeTChan ucmdCh ECU.Kill 
-    _ <- atomically $ writeTChan logdCh (j,ECU.Quit )
-    -- throwTo ecu ThreadKilled     
-    -- throwTo logger ThreadKilled  
+    -- j <- currentTime
+    _ <- atomically $ writeTChan ucmdCh ECU.Quit
+--    _ <- atomically $ writeTChan logdCh (j,ECU.Quit )
+    throwTo ecu ThreadKilled     
+    throwTo logger ThreadKilled  
 
     Prelude.putStrLn "Thank you for using Mini ECU Monitor. See you again!"
     -- killThread ecuT -- いきなり kill すると支障が出るか，要調査
