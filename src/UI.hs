@@ -183,12 +183,12 @@ handleEvent (AppEvent (_,ECU.OffLined)) = do
   put $ s { after = Restart }
 --  halt
 --  
-handleEvent (AppEvent (t,ECU.Dummy r)) = do
+handleEvent (AppEvent (t,ECU.GotDummy807d r)) = do
   s <- get
   let f = ECU.parse r
   put $ s 
       { rdat = DataSet
-          { evnt = ( t,ECU.Dummy r )
+          { evnt = ( t,ECU.GotDummy807d r )
           , note = "Got Dummy Data"
           }
       , dset    = take maxData $ rdat s : dset s
@@ -197,12 +197,12 @@ handleEvent (AppEvent (t,ECU.Dummy r)) = do
           Just _  -> iCoolT s
           Nothing -> Just $ ECU.coolantTemp f  
       }
-handleEvent (AppEvent (t,ECU.Tick r)) = do
+handleEvent (AppEvent (t,ECU.Tick' r)) = do
   s <- get
   let f = ECU.parse r
   put $ s 
       { rdat = DataSet
-          { evnt = ( t,ECU.Tick r )
+          { evnt = ( t,ECU.Tick' r )
           -- , gdat = 
           --         [ (engspeed,    ECU.engineSpeed  f )
           --         , (tposition,   ECU.ithrottlePot f )
@@ -223,8 +223,8 @@ handleEvent (AppEvent (t,ECU.Tick r)) = do
 --
 handleEvent (VtyEvent (V.EvKey (V.KChar 'q') [])) = do
   s <- get
-  j <- liftIO currentTime
-  _ <- liftIO $ atomically $ writeTChan (lchan s) (j,ECU.Quit)
+  -- j <- liftIO currentTime
+--   _ <- liftIO $ atomically $ writeTChan (lchan s) (j,ECU.Quit)
   put $ s { after = Quit }
   halt
 handleEvent (VtyEvent (V.EvKey (V.KChar 'r') [])) = do { s <- get ; put $ s { after = Restart } ; halt }
@@ -242,60 +242,44 @@ handleEvent (VtyEvent (V.EvKey (V.KChar '1') [])) = do
                 put $ s { rdat = UI.DataSet { evnt = (t,ECU.Done "Init command issued.") , note = "I will initialize mems." }}
 
     _       -> continueWithoutRedraw
--- handleEvent s (VtyEvent (V.EvKey (V.KChar '2') []))
---   | not $ testmode s = continue s { rdat = (rdat s) { note = ""}}
---   | otherwise        = do
---         let ch = cchan s
---         liftIO $ atomically $ writeTChan ch ECU.Disconnect
---         continue s { rdat = (rdat s) { note = "I will disconnect mems."}}
+handleEvent (VtyEvent (V.EvKey (V.KChar '2') [])) = do
+  s <- get
+  liftIO $ atomically $ writeTChan (cchan s ) ECU.Disconnect
+  put s { rdat = (rdat s) { note = "I will disconnect mems."}}
 handleEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = do
   s <- get
   t <- liftIO currentTime
   liftIO $ atomically $ writeTChan (cchan s) ECU.ClearFaults
   put $ s { rdat = UI.DataSet { evnt = ( t, ECU.Done "Clear Faults command issued." ),  note = "I will clear faults."} }
 -- -- | 'p' -> Get IAC Position 
--- -- handleEvent s (VtyEvent (V.EvKey (V.KChar 'p') []))
--- --   | inmenu s && not (testmode s) = do
--- --         let ch = cchan s
--- --         liftIO $ atomically $ writeTChan ch ECU.GetIACPos
--- --         continue s { rdat = (rdat s) { note = "I will get IAC Position."}}
--- --   | otherwise = continue s { rdat = (rdat s) { note = ""}}
--- handleEvent s (VtyEvent (V.EvKey V.KRight []))
---   | not $ inmenu s = continue s
---   | otherwise = do
---             let ch = cchan s
---             liftIO $ atomically $ writeTChan ch ECU.IncIACPos
---             continue s { rdat = (rdat s) { note = "I will increment IAC Pos." }}
--- handleEvent s (VtyEvent (V.EvKey V.KLeft [])) 
---   | not $ inmenu s = continue s
---   | otherwise = do
---             let ch = cchan s
---             liftIO $ atomically $ writeTChan ch ECU.DecIACPos
---             continue s { rdat = (rdat s) { note = "I will decrement IAC Pos." }}
--- handleEvent s (VtyEvent (V.EvKey V.KUp []))
---   | not $ inmenu s = continue s
---   | otherwise = do
---             let ch = cchan s
---             liftIO $ atomically $ writeTChan ch ECU.IncIgAd
---             continue s { rdat = (rdat s) { note = "I will increment Ignition Ad." }}
--- handleEvent s (VtyEvent (V.EvKey V.KDown [])) 
---   | not $ inmenu s = continue s
---   | otherwise = do
---             -- t <- liftIO Lib.currentTime
---             let ch = cchan s
---             liftIO $ atomically $ writeTChan ch ECU.DecIgAd
---             continue s { rdat = (rdat s) { note = "I will decrement Ignition Ad." }}
--- -- | 'd' -> get dummy data
--- --     This is a temporal handler which produce a dummy data
--- --    If the machine is in a test mode, this function do nothing.
+handleEvent (VtyEvent (V.EvKey (V.KChar 'p') [])) = do
+  s <- get
+  liftIO $ atomically $ writeTChan (cchan s) ECU.GetIACPos
+  put s { rdat = (rdat s) { note = "I will get IAC Position."}}
+handleEvent (VtyEvent (V.EvKey V.KRight [])) = do
+  s <- get
+  liftIO $ atomically $ writeTChan (cchan s) ECU.IncIACPos
+  put s { rdat = (rdat s) { note = "I will increment IAC Pos." }}
+handleEvent (VtyEvent (V.EvKey V.KLeft [])) = do
+  s <- get
+  liftIO $ atomically $ writeTChan (cchan s) ECU.DecIACPos
+  put s { rdat = (rdat s) { note = "I will decrement IAC Pos." }}
+handleEvent (VtyEvent (V.EvKey V.KUp [])) = do
+  s <- get
+  liftIO $ atomically $ writeTChan (cchan s) ECU.IncIgAd
+  put s { rdat = (rdat s) { note = "I will increment Ignition Ad." }}
+handleEvent (VtyEvent (V.EvKey V.KDown []))  = do
+  s <- get
+  liftIO $ atomically $ writeTChan ( cchan s )  ECU.DecIgAd
+  put s { rdat = (rdat s) { note = "I will decrement Ignition Ad." }}
+-- | This is a temporal handler which produce a dummy data
 handleEvent (VtyEvent (V.EvKey (V.KChar 'd') [])) = do
   s <- get
   liftIO $ atomically $ writeTChan (cchan s) ECU.GetDummy807d
-  s' <- liftIO $ getDummyStatus s
-  put s'
+  put s 
   -- $ s { rdat = UI.DataSet { evnt = ( t, ECU.GetDummy807d ),  note = "I will get dummy data."} }
 --
--- handleEvent s (VtyEvent (V.EvKey (V.KChar _) [])) = continue s
+handleEvent (VtyEvent (V.EvKey (V.KChar _) [])) = continueWithoutRedraw
 -- --
 handleEvent  (VtyEvent _ ) = continueWithoutRedraw
 -- --
@@ -306,7 +290,7 @@ getDummyStatus :: Status -> IO Status
 getDummyStatus s = do
   dummyLiveData <- ECU.dummyData807d
   jikoku        <- Lib.currentTime
-  let d = DataSet { evnt = (jikoku, ECU.Tick dummyLiveData)
+  let d = DataSet { evnt = (jikoku, ECU.GotDummy807d dummyLiveData)
                   , note = "dummy data"
                   } 
   return s
@@ -415,10 +399,10 @@ drawEcuStatus s = viewport StatusPane Horizontal $ hLimit 30 $
     ECU.PortNotFound f -> withAttr errorAttr  $ str (" Port Not Found :" ++ f )
     ECU.Connected _    -> withAttr normalAttr $ str (" Connected. " ++ show (model s) ++ "(" ++ show (ECU.d80size $ frameData s) ++ "," ++ show (ECU.d7dsize $ frameData s) ++ ")")
     ECU.OffLined       -> withAttr alertAttr  $ str " Off Line                      "
-    ECU.Tick _         ->
+    ECU.Tick' _        ->
       withAttr  (if True then normalAttr else alertAttr)
        $ str (" Connected. " ++ show ( model s ) ++ "(" ++ show  ( ECU.d80size (frameData s)) ++ "," ++ show (ECU.d7dsize ( frameData s )) ++ ")")
-    ECU.Dummy _        -> withAttr alertAttr  $ str (" Dummy")  
+    ECU.GotDummy807d _ -> withAttr alertAttr  $ str  " Dummy"
     ECU.GotIACPos _    -> withAttr normalAttr $ str (" Connected. " ++ show (model s) ++ "(" ++ show (ECU.d80size $ frameData s) ++ "," ++ show (ECU.d7dsize $ frameData s) ++ ")")
     ECU.Error m        -> withAttr errorAttr  $ str (" Error             : " ++ m )
     _                  -> emptyWidget
@@ -430,7 +414,7 @@ drawEcuErrorContents s = viewport ErrorContentsPane Horizontal $
       ECU.PortNotFound f -> withAttr errorAttr  $ str f
       ECU.Connected m    -> withAttr normalAttr $ str . show $ ECU.longName m
       ECU.OffLined       -> withAttr errorAttr  $ str "     "
-      ECU.Tick _         -> emptyWidget
+      ECU.Tick' _        -> emptyWidget
       ECU.Error s'       -> withAttr errorAttr  $ str s'
       _                  -> emptyWidget
 --
@@ -456,8 +440,8 @@ draw807dData s = vLimit 21 $
                       )
   where
           d' = ECU.parse $ case event s of
-                  ECU.Tick r -> r
-                  _          -> ECU.emptyData807d
+                  ECU.Tick' r -> r
+                  _           -> ECU.emptyData807d
 --  vLimit 21 $ case event s of
 --   ECU.PortNotFound p -> drawInitialScreen ver date-- hLimit 60 $ vBox [drawData s]
 --   _                  -> -- ECU.OffLine or ECU.OnLine
@@ -503,12 +487,12 @@ drawGraph s = viewport GraphPane Both $ str $ plotStrWithConfig config graph
     e t = snd . evnt $ dset s !! round t
     esp :: PlotFunction
     esp t  = case e t of
-                ECU.Tick r -> 100.0 / 4000.0 * ( fromIntegral . ECU.engineSpeed $ ECU.parse r )
-                _          -> 0
+                ECU.Tick' r -> 100.0 / 4000.0 * ( fromIntegral . ECU.engineSpeed $ ECU.parse r )
+                _           -> 0
     isdev :: PlotFunction
     isdev t = case e t of
-                ECU.Tick r -> 100.0 / 1000.0 * ( realToFrac . ECU.idleSpdDev $ ECU.parse r )
-                _          -> 0
+                ECU.Tick' r -> 100.0 / 1000.0 * ( realToFrac . ECU.idleSpdDev $ ECU.parse r )
+                _           -> 0
     -- tpot :: PlotFunction
     -- tpot t = case e t of
     --             ECU.Tick r -> 100.0 / 4.0 * ( realToFrac . ECU.throttlePot $ ECU.parse r )
@@ -535,11 +519,11 @@ drawGraph s = viewport GraphPane Both $ str $ plotStrWithConfig config graph
     --             _          -> 0
     igad :: PlotFunction
     igad t = case e t of
-                ECU.Tick r -> 100.0 / 135.0 * ( realToFrac . ECU.ignitionAd $ ECU.parse r )
-                _          -> 0
+                ECU.Tick' r -> 100.0 / 135.0 * ( realToFrac . ECU.ignitionAd $ ECU.parse r )
+                _           -> 0
     o2vt t = case e t of
-                ECU.Tick r -> 100.0 / 1000.0 * ( fromIntegral . ECU.lambda_voltage $ ECU.parse r )
-                _          -> 0
+                ECU.Tick' r -> 100.0 / 1000.0 * ( fromIntegral . ECU.lambda_voltage $ ECU.parse r )
+                _           -> 0
 --
 -- | 単純文字列グラフバージョン
 drawGraph' :: Status -> Widget Name
@@ -567,15 +551,20 @@ drawGraph' s = viewport GraphPane Both $
         hBarCh mind maxd f ds = case snd $ evnt ds of
           -- Initialized _  -> 'i'
           -- ECU.LiveData _     -> '*'
-          ECU.Quit           -> 'q'
+          -- ECU.Quit           -> 'q'
           ECU.Done _         -> 'G'
           ECU.GotIACPos _    -> 'C'
           ECU.Error _        -> 'E'
           ECU.PortNotFound _ -> 'x'
           ECU.Connected _    -> '+'
+          ECU.Disconnected   -> '.'
           ECU.OffLined       -> '-'
-          ECU.Dummy _        -> 'D'
-          ECU.Tick r         -> let d = f $ ECU.parse r in case  (d < mind, maxd < d) of
+          ECU.GotDummy807d _ -> 'D'
+          ECU.Tick' r        -> let d = f $ ECU.parse r in case  (d < mind, maxd < d) of
+            (True, _   ) -> 'L'
+            (_,True    ) -> 'U'
+            _            -> gs !! truncate (  toRational ( length gs -1 )  *   ( toRational d - toRational mind ) / toRational (maxd-mind))
+          ECU.Got807d r  -> let d = f $ ECU.parse r in case  (d < mind, maxd < d) of
             (True, _   ) -> 'L'
             (_,True    ) -> 'U'
             _            -> gs !! truncate (  toRational ( length gs -1 )  *   ( toRational d - toRational mind ) / toRational (maxd-mind))
@@ -606,12 +595,12 @@ drawEcuFaultStatus s = case event s of
                         <+> ge "16.TPOT" e16 )
       where
         ge m f =  let atr = if f then errorAttr else normalAttr
-                  in      ( withAttr normalAttr (str " ") )
-                      <+> ( withAttr atr ( str m ) )
-                      <+> ( withAttr normalAttr (str " ") )
+                  in      withAttr normalAttr (str " ") 
+                      <+> withAttr atr ( str m ) 
+                      <+> withAttr normalAttr (str " ") 
         d' = ECU.parse $ case snd . evnt $ rdat s of 
-              ECU.Tick r ->  r
-              _          -> ECU.emptyData807d
+              ECU.Tick' r ->  r
+              _           -> ECU.emptyData807d
         -- e0d = printf "%2X" $ ECU.faultCode0D d'
         -- e0e = printf "%2X" $ ECU.faultCode0E d'
         e01 = ECU.faultCode1  d' -- (01) Coolant temp Sensor
@@ -668,9 +657,9 @@ drawData s = viewport DataPane Vertical $ case event s of
   ECU.PortNotFound _ -> UI.drawInitialScreen ver
   _                  -> -- ECU.OffLine or ECU.OnLine
                str ( printf "   Engine Speed (rpm) :   %5d o "    ( ECU.engineSpeed d' ) ) <+> hLimit 10 ( BP.progressBar Nothing (dratio 0 3500 ECU.engineSpeed)    )
-        <=>  ( str ( printf "throttle Potent ( V ) :   %5.2f x "  ( ECU.throttlePot d' ) )   <+> hLimit 10 ( BP.progressBar Nothing (dratio 0.0 4.0 ECU.throttlePot)   ) )
-        <=>  ( str ( printf "     map Sensor (kPa) :     %3d   "  ( ECU.mapSensor   d' ) )   <+> hLimit 10 ( BP.progressBar Nothing (dratio 0 130 ECU.mapSensor)       ) )
-        <=>  ( str ( printf "battery Voltage ( V ) :   %5.2f   "  ( ECU.battVoltage d' ) )   <+> hLimit 10 ( BP.progressBar Nothing (dratio 11.0 15.0 ECU.battVoltage) ) )
+        <=>  ( str ( printf "throttle Potent ( V ) :   %5.2f x "  ( ECU.throttlePot d' ) ) <+> hLimit 10 ( BP.progressBar Nothing (dratio 0.0 4.0 ECU.throttlePot)   ) )
+        <=>  ( str ( printf "     map Sensor (kPa) :     %3d   "  ( ECU.mapSensor   d' ) ) <+> hLimit 10 ( BP.progressBar Nothing (dratio 0 130 ECU.mapSensor)       ) )
+        <=>  ( str ( printf "battery Voltage ( V ) :   %5.2f   "  ( ECU.battVoltage d' ) ) <+> hLimit 10 ( BP.progressBar Nothing (dratio 11.0 15.0 ECU.battVoltage) ) )
         <=>  ( ( case iCoolT s of
                   Just t0 -> if coolantTemp > t0 + 1 then
                               withAttr normalAttr
@@ -706,8 +695,8 @@ drawData s = viewport DataPane Vertical $ case event s of
               (_ , True )  -> 1.0
               _            -> fromRational ((toRational dt - toRational llimit ) / (toRational hlimit - toRational llimit))
              where dt = case event s of
-                          ECU.Tick r -> f $ ECU.parse r
-                          _          -> llimit
+                          ECU.Tick' r -> f $ ECU.parse r
+                          _           -> llimit
 -- Prelude.putStrLn $ vt100mv 30 0  ++ "----------------- Log -------------------------"
 -- mapM_ (Prelude.putStrLn . take 40 ) (if length logs >= 4 then take 4 logs else logs)
 -- Prelude.putStrLn $ vt100mv 36 0  ++ "-----------------------------------------------" ++ vt100mv 3 0
@@ -720,8 +709,8 @@ event = snd . UI.evnt . rdat
 --
 frameData :: Status -> ECU.Frame
 frameData s = ECU.parse $ case event s of
-  ECU.Tick r -> r
-  _          -> ECU.emptyData807d
+  ECU.Tick' r -> r
+  _           -> ECU.emptyData807d
 testBitPlace :: Status -> Int
 testBitPlace s 
           | model s == ECU.MNE10078 = 1
